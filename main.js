@@ -114,7 +114,6 @@ const COMPANIONS = [
   { id: "obsidian-icon-folder", name: "Iconize", why: "Use Iconize's icons (Font Awesome, Boxicons, emoji…) in the panel and keep both in sync." },
   { id: "notion-style-comments", name: "Notion-style Comments", mine: true, why: "Notion-like margin comments that match this look." },
   { id: "notion-selection-toolbar", name: "Notion Selection Toolbar", mine: true, why: "A floating formatting toolbar in the same style." },
-  { id: "calendar", name: "Calendar", why: "The Calendar entry at the top of the panel opens its calendar view." },
 ];
 
 const DEFAULT_SETTINGS = {
@@ -245,6 +244,15 @@ class TypefoldPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("rename", (f, old) => { this.renamePinned(old, f.path); this.requestRebuild(); }));
     this.registerEvent(this.app.workspace.on("file-open", (file) => { this.requestDecorate(); this.refreshViews(true); this.autoReveal(file); }));
     this.registerEvent(this.app.workspace.on("layout-change", () => this.requestDecorate()));
+    // hide Obsidian's vault bar while the navigator is the visible left-sidebar tab (our footer replaces it)
+    const navShown = () => {
+      const ws = this.app.workspace;
+      document.body.toggleClass("ot-nav-shown", ws.getLeavesOfType(VIEW_TYPE)
+        .some((l) => l.getRoot?.() === ws.leftSplit && l.containerEl?.style.display !== "none"));
+    };
+    this.registerEvent(this.app.workspace.on("layout-change", navShown));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", navShown));
+    this.app.workspace.onLayoutReady(navShown);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.requestDecorate()));
     // default-explorer mode: if something shows the core File explorer, show this panel instead
     this.registerEvent(this.app.workspace.on("layout-change", () => {
@@ -330,7 +338,7 @@ class TypefoldPlugin extends Plugin {
   onunload() {
     for (const m of [...OPEN_MODALS]) { try { m.close(); } catch (e) {} }
     OPEN_MODALS.clear();
-    document.body.removeClass("ot-theme", "ot-hide-props", "ot-replace-explorer");
+    document.body.removeClass("ot-theme", "ot-hide-props", "ot-replace-explorer", "ot-nav-shown");
     if (this.settings) { this.settings.replaceExplorer = false; this.applyExplorerMode(); }
     document.querySelectorAll(".ot-note-header, .ot-related").forEach((el) => el.remove());
     document.querySelectorAll(".ot-object-note").forEach((el) => el.removeClass("ot-object-note"));
@@ -429,7 +437,10 @@ class TypefoldPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", sync));
     this.registerEvent(this.app.workspace.on("file-open", sync));
     this.registerEvent(this.app.vault.on("modify", (f) => { if (f.extension === "base") setTimeout(sync, 150); }));
-    this.register(() => document.querySelectorAll(".ot-view-tabs").forEach((e) => e.remove()));
+    this.register(() => {
+      document.querySelectorAll(".ot-view-tabs").forEach((e) => e.remove());
+      document.querySelectorAll(".ot-has-view-tabs").forEach((e) => e.removeClass("ot-has-view-tabs"));
+    });
     // embeds already on screen were created before the hook: redraw visible notes that contain a base once
     for (const l of this.app.workspace.getLeavesOfType("markdown")) {
       if (l.view?.containerEl?.isShown?.() && l.view.contentEl.querySelector(".bases-embed")) l.rebuildView?.();
@@ -461,6 +472,7 @@ class TypefoldPlugin extends Plugin {
     const toolbar = c.viewHeaderEl?.querySelector(".bases-toolbar");
     if (!toolbar) return;
     let bar = toolbar.querySelector(":scope > .ot-view-tabs");
+    toolbar.toggleClass("ot-has-view-tabs", names.length >= 2);
     if (names.length < 2) { bar?.remove(); return; }
     if (!bar) {
       bar = createDiv("ot-view-tabs");
@@ -952,13 +964,7 @@ class TypefoldPlugin extends Plugin {
     }
     if (key === "smart:tasks") return this.app.vault.getMarkdownFiles().filter((f) =>
       (this.app.metadataCache.getFileCache(f)?.listItems || []).some((li) => li.task === " "));
-    if (key === "smart:calendar") {
-      const daily = this.app.internalPlugins?.getPluginById?.("daily-notes")?.instance?.options || {};
-      const folder = (daily.folder || "").replace(/\/$/, "");
-      const fmt = daily.format || "YYYY-MM-DD";
-      return this.app.vault.getMarkdownFiles().filter((f) =>
-        (!folder || f.path.startsWith(folder + "/")) && moment(f.basename, fmt, true).isValid());
-    }
+    if (key === "smart:calendar") return this.app.vault.getMarkdownFiles().filter((f) => this.dailyDate(f));
     return this.index.get(key)?.files || [];
   }
 
@@ -1409,6 +1415,48 @@ class TypefoldPlugin extends Plugin {
     }
     await this.ensureFolder(path.split("/").slice(0, -1).join("/"));
     return await this.app.vault.create(path, this.baseYaml(typeKey, fk?.path));
+  }
+
+  /* ── daily notes (core Daily notes settings) ── */
+  dailySettings() {
+    const o = this.app.internalPlugins?.getPluginById?.("daily-notes")?.instance?.options || {};
+    return { folder: (o.folder || "").trim().replace(/^\/+|\/+$/g, ""), format: (o.format || "").trim() || "YYYY-MM-DD", template: (o.template || "").trim() };
+  }
+  /** the date a daily note stands for, or null */
+  dailyDate(f) {
+    if (!f || f.extension !== "md") return null;
+    const { folder, format } = this.dailySettings();
+    if (folder && !f.path.startsWith(folder + "/")) return null;
+    const rel = (folder ? f.path.slice(folder.length + 1) : f.path).replace(/\.md$/, "");
+    let m = moment(rel, format, true);
+    if (!m.isValid() && !format.includes("/")) m = moment(f.basename, format, true);
+    return m.isValid() ? m : null;
+  }
+  dailyPath(m) {
+    const { folder, format } = this.dailySettings();
+    return normalizePath((folder ? folder + "/" : "") + m.format(format) + ".md");
+  }
+  async openDaily(m, evt) {
+    const path = this.dailyPath(m);
+    let file = this.app.vault.getAbstractFileByPath(path);
+    if (!file) {
+      const dir = path.split("/").slice(0, -1).join("/");
+      if (dir && !this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir).catch(() => {});
+      let body = "";
+      const tpl = this.dailySettings().template;
+      const tf = tpl && this.app.metadataCache.getFirstLinkpathDest(tpl, "");
+      if (tf) {
+        const now = moment();
+        body = (await this.app.vault.cachedRead(tf))
+          .replace(/{{\s*date\s*:\s*([^}]+?)\s*}}/gi, (_, f) => m.format(f))
+          .replace(/{{\s*time\s*:\s*([^}]+?)\s*}}/gi, (_, f) => now.format(f))
+          .replace(/{{\s*date\s*}}/gi, m.format(this.dailySettings().format))
+          .replace(/{{\s*time\s*}}/gi, now.format("HH:mm"))
+          .replace(/{{\s*title\s*}}/gi, m.format(this.dailySettings().format));
+      }
+      file = await this.app.vault.create(path, body);
+    }
+    return this.openFromPanel(file, evt);
   }
 
   async openTypeBase(key, newTab = false) {
@@ -2155,9 +2203,7 @@ class TypefoldView extends ItemView {
     this.listLimit = 0;
     this.plugin.settings.lastSelected = key;
     this.plugin.saveData(this.plugin.settings);
-    if (key === "smart:calendar" && this.app.commands?.commands?.["calendar:show-calendar-view"]) {
-      this.app.commands.executeCommandById("calendar:show-calendar-view");
-    }
+    if (key === "smart:calendar" && this.plugin.settings.listClosed) { this.selected = key; this.setListClosed(false); }
     this.selected = key;
     this.query = "";
     this.app.workspace.requestSaveLayout();
@@ -2693,7 +2739,10 @@ class TypefoldView extends ItemView {
     }
     const fk = p.parseFolderKey(key);
     const isType = !key.includes(":") || !!fk;
-    const files = this.sortedFiles(key);
+    const isCal = key === "smart:calendar";
+    const files = isCal
+      ? p.filesFor(key).map((f) => [f, p.dailyDate(f).valueOf()]).sort((a, b) => b[1] - a[1]).map((x) => x[0])
+      : this.sortedFiles(key);
     const label = p.labelFor(key);
 
     const header = pane.createDiv("ot-list-header");
@@ -2733,8 +2782,8 @@ class TypefoldView extends ItemView {
       b.onclick = fn;
       return b;
     };
-    const pr = this.listPrefs(key);
-    hbtn("arrow-up-down", "Sort", (evt) => {
+    const pr = isCal ? { ...this.listPrefs(key), group: "none" } : this.listPrefs(key);
+    if (!isCal) hbtn("arrow-up-down", "Sort", (evt) => {
       const m = new Menu();
       m.addItem((i) => i.setTitle("Sort by").setIsLabel?.(true) ?? i.setTitle("Sort by").setDisabled(true));
       for (const [v, t, ic] of [["title", "Title", "type"], ["created", "Created time", "calendar-plus"], ["edited", "Last edited time", "pencil"]]) {
@@ -2745,7 +2794,7 @@ class TypefoldView extends ItemView {
       m.addItem((i) => i.setTitle("Descending").setIcon("arrow-down").setChecked(pr.dir === "desc").onClick(() => this.setListPref(key, { dir: "desc" })));
       m.showAtMouseEvent(evt);
     });
-    const gb = hbtn("layers", "Group by", (evt) => {
+    const gb = isCal ? null : hbtn("layers", "Group by", (evt) => {
       const m = new Menu();
       m.addItem((i) => i.setTitle("Group by").setIsLabel?.(true) ?? i.setTitle("Group by").setDisabled(true));
       m.addItem((i) => i.setTitle("No group").setIcon("list").setChecked(pr.group === "none").onClick(() => this.setListPref(key, { group: "none" })));
@@ -2758,7 +2807,8 @@ class TypefoldView extends ItemView {
       }
       m.showAtMouseEvent(evt);
     });
-    gb.toggleClass("is-active", pr.group !== "none");
+    gb?.toggleClass("is-active", pr.group !== "none");
+    if (isCal) hbtn("calendar-plus", "Open today's note", (evt) => p.openDaily(moment(), evt));
     hbtn(p.settings.listMode === "grid" ? "list" : "layout-grid", "Toggle list / grid", async () => {
       p.settings.listMode = p.settings.listMode === "grid" ? "list" : "grid";
       await p.saveSettings(false); this.render();
@@ -2772,6 +2822,7 @@ class TypefoldView extends ItemView {
     const search = sw.createEl("input", { type: "text", placeholder: `Search ${label.toLowerCase()}` });
     search.value = this.query;
 
+    if (isCal) this.renderCalendar(pane, files);
     const listEl = pane.createDiv("ot-list");
     listEl.toggleClass("is-grid", p.settings.listMode === "grid");
     const draw = () => {
@@ -2785,6 +2836,7 @@ class TypefoldView extends ItemView {
       const put = (parent, f) => {
         if (shown >= limit) { hidden++; return; }
         shown++;
+        if (isCal && p.settings.listMode !== "grid") return this.renderItem(parent, f, p.dailyDate(f).format("dddd, LL"));
         return p.settings.listMode === "grid" ? this.renderCard(parent, f, key) : this.renderItem(parent, f, metaTs(f));
       };
       const finish = () => {
@@ -2795,7 +2847,9 @@ class TypefoldView extends ItemView {
         const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) { io.disconnect(); more.click(); } }, { root: listEl, rootMargin: "300px" });
         io.observe(more);
       };
-      if (pr.group === "none") {
+      if (isCal && !visible.length) {
+        listEl.createDiv({ cls: "ot-cal-empty", text: q ? "No daily notes match." : "No daily notes yet. Click a day to create one." });
+      } else if (pr.group === "none") {
         const wrap = listEl.createDiv("ot-group-items");
         visible.forEach((f) => put(wrap, f));
       } else if (pr.group === "folder") {
@@ -2879,6 +2933,7 @@ class TypefoldView extends ItemView {
         }
       }
       finish();
+      listEl.toggleClass("is-flat", !listEl.querySelector(".ot-group-items"));
       this.markActive();
     };
     search.oninput = () => { this.query = search.value; this.listLimit = 0; draw(); };
@@ -2903,7 +2958,7 @@ class TypefoldView extends ItemView {
     const item = listEl.createDiv("ot-item");
     const text = item.createDiv("ot-item-text");
     text.createDiv({ cls: "ot-item-title", text: file.extension === "md" ? file.basename : file.name });
-    text.createDiv({ cls: "ot-item-meta", text: relTime(ts) });
+    text.createDiv({ cls: "ot-item-meta", text: typeof ts === "string" ? ts : relTime(ts) });
     const thumb = this.plugin.thumbnailFor(file);
     if (thumb) item.createEl("img", { cls: "ot-thumb", attr: { src: thumb, loading: "lazy" } });
     this.bindFile(item, file);
@@ -2920,8 +2975,49 @@ class TypefoldView extends ItemView {
     this.bindFile(card, file);
   }
 
+  renderCalendar(pane, files) {
+    const p = this.plugin;
+    const byDay = new Map(files.map((f) => [p.dailyDate(f).format("YYYY-MM-DD"), f]));
+    const month = (this.calMonth ||= moment().startOf("month"));
+    const cal = pane.createDiv("ot-cal");
+    const head = cal.createDiv("ot-cal-head");
+    const title = head.createDiv("ot-cal-title");
+    title.createSpan({ cls: "ot-cal-month", text: month.format("MMMM") });
+    title.createSpan({ cls: "ot-cal-year", text: month.format("YYYY") });
+    const nav = head.createDiv("ot-cal-nav");
+    const go = (m) => { this.calMonth = m.clone().startOf("month"); this.render(); };
+    const btn = (icon, tip, fn) => { const b = nav.createDiv("ot-cal-btn"); setIcon(b, icon); b.setAttr("aria-label", tip); b.onclick = fn; };
+    btn("chevron-left", "Previous month", () => go(month.clone().subtract(1, "month")));
+    const today = nav.createDiv({ cls: "ot-cal-today", text: "Today" });
+    today.onclick = () => go(moment());
+    btn("chevron-right", "Next month", () => go(month.clone().add(1, "month")));
+
+    const grid = cal.createDiv("ot-cal-grid");
+    const first = moment.localeData().firstDayOfWeek();
+    for (let i = 0; i < 7; i++) grid.createDiv({ cls: "ot-cal-dow", text: moment().day((first + i) % 7).format("dd") });
+    const offset = (month.day() - first + 7) % 7;
+    const weeks = Math.ceil((offset + month.daysInMonth()) / 7);
+    const d = month.clone().subtract(offset, "day");
+    const todayKey = moment().format("YYYY-MM-DD");
+    for (let i = 0; i < weeks * 7; i++, d.add(1, "day")) {
+      const day = d.clone();
+      const k = day.format("YYYY-MM-DD");
+      const f = byDay.get(k);
+      const cell = grid.createDiv("ot-cal-day");
+      cell.createSpan({ cls: "ot-cal-num", text: String(day.date()) });
+      cell.createSpan("ot-cal-dot");
+      cell.toggleClass("is-outside", day.month() !== month.month());
+      cell.toggleClass("is-today", k === todayKey);
+      cell.toggleClass("has-note", !!f);
+      if (f) cell.dataset.path = f.path;
+      cell.setAttr("aria-label", day.format("LL") + (f ? "" : " · New daily note"));
+      cell.onclick = (evt) => p.openDaily(day, evt);
+    }
+  }
+
   markActive() {
     const active = this.app.workspace.getActiveFile()?.path;
+    this.contentEl.querySelectorAll(".ot-cal-day").forEach((el) => el.toggleClass("is-active", !!el.dataset.path && el.dataset.path === active));
     this.contentEl.querySelectorAll(".ot-item").forEach((el) => el.toggleClass("is-active", el.dataset.path === active));
     this.contentEl.querySelectorAll(".ot-file-row").forEach((el) => el.toggleClass("is-active-note", el.dataset.path === active));
   }

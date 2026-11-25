@@ -30,6 +30,7 @@ Register a folder as a type (People, Books, Projects, School…) and Typefold gi
 
 ### Home dashboard and new-tab search
 - **Home**: a greeting that changes with the time, the day and the weather, every type as a card, and recently edited notes as a list or cards.
+- **Calendar**: a month calendar at the top of the note list, with your daily notes listed newest first underneath. Days with a note get a dot; click a day to open its note or create it from your core Daily notes folder, format and template.
 - **New tab (⌘T)**: a search panel — recent notes grouped by date, fuzzy search, filter by type, preview on the right. `↵` open · `⌘↵` new tab · `⌘L` copy link.
 
 ![New-tab search](docs/search.png)
@@ -51,7 +52,6 @@ Typefold works on its own. These add to it, and Typefold's settings show each on
 | [Iconize](https://github.com/FlorianWoelki/obsidian-iconize) | Use and sync Iconize's icon packs and emoji |
 | [Notion-style Comments](https://github.com/jiwooroh/notion-document-comments) ✦ | Margin comments in the same style |
 | [Notion Selection Toolbar](https://github.com/jiwooroh/notion-selection-toolbar) ✦ | A floating formatting toolbar in the same style |
-| [Calendar](https://github.com/liamcain/obsidian-calendar-plugin) | Opens from the Calendar entry in the sidebar |
 
 ✦ by the same author. The core **Bases** plugin should be enabled for type pages, boards and view tabs.
 

@@ -25,8 +25,8 @@ body {
 .ot-icon svg { width: 13px; height: 13px; stroke-width: 2; }
 
 /* ───────── navigator layout ───────── */
-.workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root {
-  padding: 0 !important; display: flex; height: 100%; overflow: hidden;
+.workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root.ot-root {
+  padding: 0; display: flex; height: 100%; overflow: hidden;
 }
 .ot-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; }
 .ot-nav-pane { background: var(--ot-pane-bg); flex: 1; }
@@ -92,8 +92,8 @@ body {
   color: var(--text-faint);
 }
 .ot-list-search svg { width: 14px; height: 14px; }
-.ot-list-search input {
-  flex: 1; border: none !important; background: transparent !important; box-shadow: none !important;
+.ot-list-search input[type="text"], .ot-list-search input[type="text"]:focus, .ot-list-search input[type="text"]:hover {
+  flex: 1; border: none; background: transparent; box-shadow: none;
   padding: 0; height: 100%; font-size: 13.5px;
 }
 
@@ -121,7 +121,7 @@ body {
 .ot-list-empty { margin: auto; }
 
 /* grid mode */
-.ot-list.is-grid .ot-group-items, .ot-list.is-grid:not(:has(.ot-group-items)) {
+.ot-list.is-grid .ot-group-items, .ot-list.is-grid.is-flat {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; padding: 0 4px;
 }
 .ot-grid-card { flex-direction: column; align-items: stretch; gap: 6px; padding: 6px; min-height: 0; }
@@ -160,8 +160,8 @@ body {
 .ot-collection:hover { text-decoration: underline; }
 .ot-dot { color: var(--text-faint); margin: 0 -1px; }
 .ot-object-note .inline-title { font-size: 2.15em; font-weight: 800; letter-spacing: -0.02em; margin-top: 6px; }
-body.ot-hide-props .ot-object-note .metadata-container,
-body.ot-hide-props .ot-object-note .pp-properties-container { display: none !important; }
+body.ot-hide-props .workspace-leaf-content .ot-object-note .metadata-container,
+body.ot-hide-props .workspace-leaf-content .ot-object-note .pp-properties-container { display: none !important; }
 
 /* ───────── object note: related ───────── */
 .ot-related { margin: 40px 0 24px; padding-top: 14px; border-top: 1px solid var(--background-modifier-border); }
@@ -200,8 +200,8 @@ body.ot-hide-props .ot-object-note .pp-properties-container { display: none !imp
 .ot-link-icon {
   --ot-color: #8e8e93;
   display: inline-flex; vertical-align: -0.12em; margin-right: 3px; color: var(--ot-color);
-  text-decoration: none !important;
 }
+.ot-link-icon.ot-link-icon, a .ot-link-icon.ot-link-icon { text-decoration-line: none; }
 .ot-link-icon svg { width: 0.95em; height: 0.95em; stroke-width: 2.2; }
 a.internal-link .ot-link-icon { pointer-events: none; }
 
@@ -218,7 +218,7 @@ body.ot-theme {
   --link-decoration-thickness: 1px;
 }
 body.ot-theme .markdown-rendered a.internal-link,
-body.ot-theme .cm-s-obsidian span.cm-hmd-internal-link { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--ot-link) 45%, transparent); }
+body.ot-theme .cm-s-obsidian span.cm-hmd-internal-link { text-decoration-line: underline; text-underline-offset: 3px; }
 body.ot-theme .workspace-tab-header.is-active.mod-active .workspace-tab-header-inner,
 body.ot-theme .mod-root .workspace-tab-header.is-active { background-color: var(--ot-highlight-strong); }
 
@@ -264,7 +264,7 @@ body.ot-theme .mod-root .workspace-tab-header.is-active { background-color: var(
 .ot-banner-option-path { font-size: 11.5px; color: var(--text-faint); }
 
 /* hide Obsidian's own vault bar under the navigator (our footer replaces it) */
-.mod-left-split:has(.workspace-leaf:not([style*="display: none"]) > .workspace-leaf-content[data-type="typefold-view"]) .workspace-sidedock-vault-profile { display: none; }
+body.ot-nav-shown .workspace-split.mod-left-split .workspace-sidedock-vault-profile { display: none; }
 .ot-nav-foot { padding-bottom: 12px; }
 
 /* manual ordering */
@@ -372,7 +372,7 @@ body.ot-theme .mod-root .workspace-tab-header.is-active { background-color: var(
 .ot-list-close-floating { position: absolute; top: 10px; right: 8px; }
 .ot-list-pane { position: relative; }
 .ot-list-toggle { flex: none; height: 30px; width: 30px; display: flex; align-items: center; justify-content: center; }
-.ot-list-closed .ot-nav-pane { flex: 1; width: auto !important; }
+.ot-list-closed .ot-nav-pane { flex: 1; width: auto; }
 
 /* section "+" (new type) */
 .ot-section-title { display: flex; align-items: center; }
@@ -499,8 +499,8 @@ body.ot-theme .mod-root .workspace-tab-header.is-active { background-color: var(
 .ot-folder-icon.ot-icon { color: var(--ot-color); }
 
 /* no-colour swatch */
-.ot-swatch-none {
-  background: var(--background-primary) !important;
+.ot-swatch.ot-swatch-none {
+  background: var(--background-primary);
   box-shadow: inset 0 0 0 1.5px var(--background-modifier-border-hover);
   position: relative; --ot-color: var(--text-muted);
 }
@@ -516,8 +516,8 @@ body.ot-theme .mod-root .workspace-tab-header.is-active { background-color: var(
 .ot-archived-row:hover .ot-row-restore { display: inline-flex; }
 
 /* properties: hidden by default, shown per note via the "N properties" chip */
-body.ot-hide-props .ot-object-note.ot-show-props .metadata-container { display: block !important; }
-body.ot-hide-props .ot-object-note.ot-show-props .pp-properties-container { display: block !important; }
+body.ot-hide-props .workspace-leaf-content .ot-object-note.ot-show-props .metadata-container { display: block !important; }
+body.ot-hide-props .workspace-leaf-content .ot-object-note.ot-show-props .pp-properties-container { display: block !important; }
 .ot-props-chip { color: var(--text-muted); font-weight: 500; }
 .ot-props-chip .ot-chip-icon { color: var(--text-faint); }
 .ot-props-chip.is-open { color: var(--text-normal); border-color: var(--ot-accent); background: color-mix(in srgb, var(--ot-accent) 8%, var(--background-primary)); }
@@ -572,7 +572,7 @@ body.ot-replace-explorer .workspace-tab-header[data-type="file-explorer"] { disp
 .ot-note-top { margin: 0 0 4px; }
 .ot-note-top .ot-banner { margin: 0 0 22px; }
 .ot-object-note .iconize-title-icon { margin-top: 6px !important; margin-bottom: 22px !important; }
-.ot-object-note .inline-title { margin-top: 0 !important; margin-bottom: 0 !important; }
+.markdown-source-view .ot-object-note .inline-title, .markdown-reading-view .ot-object-note .inline-title, .ot-object-note .inline-title.inline-title { margin-top: 0; margin-bottom: 0; }
 .ot-note-chipsrow { margin: 16px 0 14px; }
 .ot-note-chipsrow .ot-chips { margin: 0; }
 
@@ -594,7 +594,7 @@ body.ot-replace-explorer .workspace-tab-header[data-type="file-explorer"] { disp
 
 /* view tabs: left-aligned at the start of the Bases toolbar */
 /* directly after "N results", tools stay on the right */
-.bases-toolbar:has(> .ot-view-tabs) > .bases-toolbar-result-count { margin-right: 0 !important; flex: none; }
+.bases-toolbar.ot-has-view-tabs > .bases-toolbar-result-count.bases-toolbar-result-count { margin-right: 0; flex: none; }
 .bases-toolbar > .ot-view-tabs { order: 0; margin: 0 auto 0 8px; justify-content: flex-start; flex: 0 1 auto; }
 
 /* coloured view tabs */
@@ -608,7 +608,7 @@ body.ot-replace-explorer .workspace-tab-header[data-type="file-explorer"] { disp
 .ot-section-title .ot-section-add { padding: 2px 3px; }
 .ot-section-title .ot-section-add {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; padding: 0 !important; border-radius: 5px;
+  width: 20px; height: 20px; padding: 0; border-radius: 5px;
 }
 .ot-section-title .ot-toggle-all + .ot-section-add { margin-left: 1px; }
 /* header buttons line up with the rows' right edge (rows have 8px side padding) */
@@ -616,16 +616,43 @@ body.ot-replace-explorer .workspace-tab-header[data-type="file-explorer"] { disp
 .ot-section-title .ot-section-add { width: 18px; height: 18px; }
 .ot-section-title .ot-toggle-all + .ot-section-add { margin-left: 3px; }
 
+/* ───────────────── Calendar (daily notes) ───────────────── */
+.ot-cal { margin: 2px 10px 6px; padding: 4px 2px 8px; flex-shrink: 0; border-bottom: 1px solid var(--background-modifier-border); }
+.ot-cal-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px 6px; }
+.ot-cal-title { font-size: var(--font-ui-medium); font-weight: 600; color: var(--text-normal); }
+.ot-cal-year { margin-left: 5px; color: var(--text-muted); font-weight: 500; }
+.ot-cal-nav { display: flex; align-items: center; gap: 1px; }
+.ot-cal-btn { --icon-size: 16px; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer; }
+.ot-cal-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-cal .ot-cal-btn svg.svg-icon, .ot-cal .ot-cal-btn svg { width: 16px; height: 16px; stroke-width: 2px; }
+.ot-cal-today { font-size: var(--font-ui-smaller); color: var(--text-muted); padding: 2px 6px; border-radius: 5px; cursor: pointer; }
+.ot-cal-today:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 1px; }
+.ot-cal-dow { text-align: center; font-size: 10.5px; font-weight: 500; color: var(--text-faint); padding: 2px 0 4px; text-transform: uppercase; }
+.ot-cal-day { position: relative; height: 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 7px; cursor: pointer; font-size: var(--font-ui-small); color: var(--text-normal); font-variant-numeric: tabular-nums; }
+.ot-cal-day:hover { background: var(--background-modifier-hover); }
+.ot-cal-day.is-outside { color: var(--text-faint); }
+.ot-cal-num { width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 50%; }
+.ot-cal-day.is-today .ot-cal-num { background: var(--color-accent); color: #fff; font-weight: 600; }
+.ot-cal-dot { width: 4px; height: 4px; border-radius: 50%; margin-top: 1px; background: transparent; }
+.ot-cal-day.has-note .ot-cal-dot { background: var(--color-accent); }
+.ot-cal-day.is-outside.has-note .ot-cal-dot { opacity: .45; }
+.ot-cal-day.is-active { background: var(--background-modifier-active-hover, var(--background-modifier-hover)); }
+.ot-cal-day.is-active .ot-cal-num { font-weight: 700; }
+body.is-mobile .ot-cal-day { height: 38px; }
+.ot-cal-empty { width: 100%; box-sizing: border-box; padding: 14px 16px; color: var(--text-faint); font-size: var(--font-ui-small); text-align: center; }
+
 /* ───────────────── Mobile (Obsidian adds body.is-mobile / body.is-phone) ───────────────── */
 /* 1. controls that only appeared on hover are always visible on touch */
 body.is-mobile .ot-section-add,
 body.is-mobile .ot-chevron,
-body.is-mobile .ot-home-type-add { opacity: 1 !important; }
+body.is-mobile .ot-home-type-add,
+body.is-mobile .ot-section-title .ot-section-add { opacity: 1; }
 body.is-mobile .ot-chevron { color: var(--text-faint); }
 body.is-mobile .ot-row-edit,
 body.is-mobile .ot-archived-row .ot-row-restore {
-  display: inline-flex !important; position: static !important; transform: none !important;
-  background: transparent !important; margin-left: auto; opacity: .55;
+  display: inline-flex; position: static; transform: none;
+  background: transparent; margin-left: auto; opacity: .55;
 }
 body.is-mobile .ot-row-edit + .ot-chevron { margin-left: 2px; }
 
@@ -723,7 +750,7 @@ body.is-phone .ot-swatch { width: 28px; height: 28px; flex: 0 0 28px; }
 .ot-qo-top { display: flex; align-items: center; gap: 12px; padding: 18px 20px 10px; }
 .ot-qo-search-icon { color: var(--text-muted); display: inline-flex; }
 .ot-qo-search-icon svg { width: 20px; height: 20px; }
-.ot-qo-top input { flex: 1; border: none !important; box-shadow: none !important; background: transparent !important; font-size: 19px; padding: 0; height: 32px; }
+.ot-qo .ot-qo-top input[type="text"], .ot-qo .ot-qo-top input[type="text"]:focus, .ot-qo .ot-qo-top input[type="text"]:hover { flex: 1; border: none; box-shadow: none; background: transparent; font-size: 19px; padding: 0; height: 32px; }
 .ot-qo-toggle svg { width: 18px; height: 18px; color: var(--ot-accent); }
 .ot-qo-filters { display: flex; gap: 6px; padding: 0 16px 10px; }
 .ot-qo-filter { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; color: var(--text-muted); cursor: pointer; }
