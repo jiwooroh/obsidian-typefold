@@ -25,7 +25,7 @@ body {
 .ot-icon svg { width: 13px; height: 13px; stroke-width: 2; }
 
 /* ───────── navigator layout ───────── */
-.workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root.ot-root {
+body .workspace-split .workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root.ot-root {
   padding: 0; display: flex; height: 100%; overflow: hidden;
 }
 .ot-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; }
