@@ -1,0 +1,765 @@
+/* ───────── tokens (follow Obsidian accent color) ───────── */
+body {
+  --ot-accent: var(--color-accent, var(--interactive-accent));
+  --ot-highlight: color-mix(in srgb, var(--ot-accent) 16%, transparent);
+  --ot-highlight-strong: color-mix(in srgb, var(--ot-accent) 24%, transparent);
+  --ot-link: var(--text-accent, var(--ot-accent));
+  --ot-card-border: rgba(0, 0, 0, 0.08);
+  --ot-pane-bg: var(--background-secondary);
+  --ot-list-bg: var(--background-primary);
+}
+.theme-dark {
+  --ot-highlight: color-mix(in srgb, var(--ot-accent) 20%, transparent);
+  --ot-highlight-strong: color-mix(in srgb, var(--ot-accent) 30%, transparent);
+  --ot-card-border: rgba(255, 255, 255, 0.08);
+}
+
+/* ───────── shared icon chip ───────── */
+.ot-icon {
+  --ot-color: #8e8e93;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 20px; height: 20px; border-radius: 6px;
+  color: var(--ot-color);
+  background: color-mix(in srgb, var(--ot-color) 14%, transparent);
+}
+.ot-icon svg { width: 13px; height: 13px; stroke-width: 2; }
+
+/* ───────── navigator layout ───────── */
+.workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root {
+  padding: 0 !important; display: flex; height: 100%; overflow: hidden;
+}
+.ot-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; }
+.ot-nav-pane { background: var(--ot-pane-bg); flex: 1; }
+.ot-split .ot-nav-pane { flex: none; }
+.ot-list-pane { flex: 1; background: var(--ot-list-bg); border-left: 1px solid var(--background-modifier-border); }
+.ot-divider { width: 4px; margin: 0 -2px; cursor: col-resize; z-index: 2; position: relative; }
+.ot-divider:hover { background: var(--interactive-accent); opacity: .4; }
+.ot-spacer { flex: 1; }
+
+/* top: New + Search */
+.ot-nav-top { display: flex; gap: 6px; padding: 10px 10px 8px; }
+.ot-new-btn, .ot-search-btn {
+  display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  border-radius: 8px; cursor: pointer; font-size: 13.5px;
+  background: var(--background-primary); border: 1px solid var(--background-modifier-border);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .03);
+}
+.ot-new-btn { font-weight: 600; color: var(--text-normal); }
+.ot-new-btn svg { width: 15px; height: 15px; }
+.ot-search-btn { flex: 1; min-width: 0; color: var(--text-faint); }
+.ot-search-btn svg { width: 14px; height: 14px; }
+.ot-search-label { flex: 1; }
+.ot-kbd { font-size: 11px; color: var(--text-faint); background: var(--background-secondary); border-radius: 4px; padding: 1px 5px; }
+.ot-new-btn:hover, .ot-search-btn:hover { background: var(--background-modifier-hover); }
+
+.ot-scroll { flex: 1; overflow-y: auto; padding: 2px 8px 12px; }
+.ot-section { margin-top: 14px; }
+.ot-smart { margin-top: 4px; }
+.ot-section-title { font-size: 12.5px; color: var(--text-faint); margin: 0 8px 4px; font-weight: 500; }
+.ot-nav-row {
+  display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px;
+  border-radius: 7px; cursor: pointer; font-size: 14px; color: var(--text-normal);
+}
+.ot-nav-row:hover { background: var(--background-modifier-hover); }
+.ot-nav-row.is-selected { background: var(--ot-highlight-strong); font-weight: 500; }
+.ot-nav-row.is-active-note { background: var(--background-modifier-hover); }
+.ot-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-count { font-size: 12px; color: var(--text-faint); }
+.ot-smart .ot-icon { background: transparent; }
+.ot-smart .ot-icon svg { width: 15px; height: 15px; }
+.ot-empty { color: var(--text-faint); font-size: 13px; padding: 8px; }
+
+/* footer */
+.ot-nav-foot { display: flex; align-items: center; gap: 2px; padding: 8px 12px 10px; border-top: 1px solid var(--background-modifier-border); }
+.ot-vault { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; font-size: 13.5px; min-width: 0; }
+.ot-vault-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-vault svg { width: 14px; height: 14px; color: var(--text-muted); }
+.ot-foot-chevron svg { width: 12px; height: 12px; }
+.ot-foot-btn svg { width: 16px; height: 16px; }
+
+/* ───────── list pane ───────── */
+.ot-list-header { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px 14px; }
+.ot-list-header .ot-icon { width: 24px; height: 24px; border-radius: 7px; }
+.ot-list-header .ot-icon svg { width: 15px; height: 15px; }
+.ot-list-title { font-weight: 700; font-size: 16px; }
+.ot-list-count { font-size: 12.5px; color: var(--text-faint); }
+.ot-head-btn svg { width: 16px; height: 16px; }
+.ot-back { margin-right: -4px; }
+
+.ot-list-search {
+  display: flex; align-items: center; gap: 6px; margin: 0 12px 6px; height: 30px; padding: 0 10px;
+  background: var(--background-modifier-form-field, var(--background-secondary)); border-radius: 8px;
+  color: var(--text-faint);
+}
+.ot-list-search svg { width: 14px; height: 14px; }
+.ot-list-search input {
+  flex: 1; border: none !important; background: transparent !important; box-shadow: none !important;
+  padding: 0; height: 100%; font-size: 13.5px;
+}
+
+.ot-list { flex: 1; overflow-y: auto; padding: 0 8px 16px; }
+.ot-group {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-faint); padding: 14px 8px 6px;
+}
+.ot-item {
+  display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 8px;
+  border-radius: 8px; cursor: pointer; position: relative;
+}
+.ot-group-items > .ot-item:not(:last-child)::after,
+.ot-list > .ot-item:not(:last-child)::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.ot-item:hover { background: var(--background-modifier-hover); }
+.ot-item.is-active { background: var(--ot-highlight); }
+.ot-item.is-active::after, .ot-item:hover::after { display: none; }
+.ot-item-text { flex: 1; min-width: 0; }
+.ot-item-title { font-weight: 600; font-size: 14px; color: var(--text-normal); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-item-meta { font-size: 12px; color: var(--text-faint); margin-top: 3px; }
+.ot-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; flex: none; box-shadow: 0 0 0 1px var(--ot-card-border); }
+.ot-list-empty { margin: auto; }
+
+/* grid mode */
+.ot-list.is-grid .ot-group-items, .ot-list.is-grid:not(:has(.ot-group-items)) {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; padding: 0 4px;
+}
+.ot-grid-card { flex-direction: column; align-items: stretch; gap: 6px; padding: 6px; min-height: 0; }
+.ot-grid-card::after { display: none; }
+.ot-grid-card .ot-card-cover { aspect-ratio: 1; border-radius: 6px; }
+.ot-grid-card .ot-card-title { font-size: 12.5px; }
+
+/* ───────── cards (shared) ───────── */
+.ot-card-cover { overflow: hidden; background: var(--background-secondary); display: flex; align-items: center; justify-content: center; }
+.ot-card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ot-card-placeholder { width: 34px; height: 34px; border-radius: 9px; }
+.ot-card-placeholder svg { width: 18px; height: 18px; }
+.ot-card-title { font-weight: 600; font-size: 13px; line-height: 1.3; color: var(--text-normal); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ot-card-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ───────── object note: header ───────── */
+.ot-note-header { margin: 0 0 4px; }
+.ot-banner { border-radius: 10px; overflow: hidden; margin: 8px 0 14px; aspect-ratio: 2 / 1; max-height: 320px; }
+.ot-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ot-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.ot-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px;
+  border-radius: 6px; font-size: 13.5px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--background-modifier-border); color: var(--text-normal);
+  background: var(--background-primary);
+}
+.ot-chip-icon { display: inline-flex; }
+.ot-chip-icon svg { width: 14px; height: 14px; }
+.ot-type-chip {
+  --ot-color: #8e8e93;
+  color: color-mix(in srgb, var(--ot-color) 75%, var(--text-normal));
+  background: color-mix(in srgb, var(--ot-color) 12%, transparent);
+  border-color: color-mix(in srgb, var(--ot-color) 22%, transparent);
+}
+.ot-collections-chip .ot-chip-icon { color: var(--text-muted); }
+.ot-collection:hover { text-decoration: underline; }
+.ot-dot { color: var(--text-faint); margin: 0 -1px; }
+.ot-object-note .inline-title { font-size: 2.15em; font-weight: 800; letter-spacing: -0.02em; margin-top: 6px; }
+body.ot-hide-props .ot-object-note .metadata-container,
+body.ot-hide-props .ot-object-note .pp-properties-container { display: none !important; }
+
+/* ───────── object note: related ───────── */
+.ot-related { margin: 40px 0 24px; padding-top: 14px; border-top: 1px solid var(--background-modifier-border); }
+.markdown-source-view .ot-related { max-width: var(--file-line-width); margin-left: auto; margin-right: auto; }
+.ot-rel-tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+.ot-rel-tab {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 11px; border-radius: 7px;
+  cursor: pointer; font-size: 14px; color: var(--text-muted);
+}
+.ot-rel-tab:hover { background: var(--background-modifier-hover); }
+.ot-rel-tab.is-active { background: var(--background-secondary); color: var(--text-normal); font-weight: 600; }
+.ot-rel-tab-count { font-size: 12px; color: var(--text-faint); font-weight: 400; }
+.ot-rel-open { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; color: var(--text-faint); cursor: pointer; padding: 0 6px; }
+.ot-rel-open svg { width: 13px; height: 13px; }
+.ot-rel-open:hover { color: var(--text-normal); }
+.ot-rel-btn svg { width: 15px; height: 15px; }
+
+.ot-rel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.ot-card {
+  display: flex; flex-direction: column; border-radius: 9px; overflow: hidden; cursor: pointer;
+  background: var(--background-primary); border: 1px solid var(--ot-card-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .05); transition: box-shadow .12s, transform .12s;
+}
+.ot-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); transform: translateY(-1px); }
+.ot-card .ot-card-cover { aspect-ratio: 4 / 3; }
+.ot-card-text { padding: 8px 10px 10px; }
+.ot-card-add {
+  align-items: center; justify-content: center; gap: 6px; min-height: 160px;
+  border: 1px dashed var(--background-modifier-border); box-shadow: none; background: transparent;
+  color: var(--text-faint); font-size: 13px;
+}
+.ot-card-add:hover { color: var(--text-normal); box-shadow: none; }
+.ot-card-add-icon svg { width: 18px; height: 18px; }
+
+/* ───────── link type icons ───────── */
+.ot-link-icon {
+  --ot-color: #8e8e93;
+  display: inline-flex; vertical-align: -0.12em; margin-right: 3px; color: var(--ot-color);
+  text-decoration: none !important;
+}
+.ot-link-icon svg { width: 0.95em; height: 0.95em; stroke-width: 2.2; }
+a.internal-link .ot-link-icon { pointer-events: none; }
+
+/* ───────── status bar ───────── */
+.ot-status { display: flex; gap: 10px; }
+.ot-status-props { cursor: pointer; }
+.ot-status-props:hover { color: var(--text-normal); }
+
+/* ───────── Capacities look (optional) ───────── */
+body.ot-theme {
+  --link-color: var(--ot-link);
+  --link-color-hover: var(--ot-link);
+  --link-unresolved-color: var(--text-muted);
+  --link-decoration-thickness: 1px;
+}
+body.ot-theme .markdown-rendered a.internal-link,
+body.ot-theme .cm-s-obsidian span.cm-hmd-internal-link { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--ot-link) 45%, transparent); }
+body.ot-theme .workspace-tab-header.is-active.mod-active .workspace-tab-header-inner,
+body.ot-theme .mod-root .workspace-tab-header.is-active { background-color: var(--ot-highlight-strong); }
+
+/* ───────── modals ───────── */
+.ot-modal-input { width: 100%; margin-bottom: 8px; }
+.ot-picker { max-height: 50vh; overflow-y: auto; }
+.ot-config-modal { width: 440px; }
+.ot-config-preview { display: flex; align-items: center; gap: 10px; padding: 4px 0 14px; font-size: 16px; font-weight: 600; }
+.ot-config-preview .ot-icon { width: 32px; height: 32px; border-radius: 9px; }
+.ot-config-preview .ot-icon svg { width: 19px; height: 19px; }
+.ot-config-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 6px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+.ot-swatches { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.ot-swatch {
+  width: 24px; height: 24px; border-radius: 50%; cursor: pointer; background: var(--ot-color);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1); transition: transform .1s;
+}
+.ot-swatch:hover { transform: scale(1.12); }
+.ot-swatch.is-selected { box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--ot-color); }
+.ot-icon-grid {
+  --ot-color: #8e8e93;
+  display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; max-height: min(240px, 32vh); overflow-y: auto;
+  padding: 4px; margin-bottom: 8px; border-radius: 8px; background: var(--background-secondary);
+}
+.ot-icon-cell { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 7px; cursor: pointer; color: var(--text-muted); }
+.ot-icon-cell svg { width: 18px; height: 18px; }
+.ot-icon-cell:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-icon-cell.is-selected { color: var(--ot-color); background: color-mix(in srgb, var(--ot-color) 16%, transparent); }
+.ot-config-buttons { display: flex; gap: 8px; margin-top: 12px; }
+.ot-setting-icon { margin-right: 8px; vertical-align: middle; }
+
+/* banner button next to chips */
+.ot-chip-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  border-radius: 6px; cursor: pointer; color: var(--text-faint); opacity: .7;
+}
+.ot-chip-btn svg { width: 15px; height: 15px; }
+.ot-chips:hover .ot-chip-btn { opacity: 1; }
+.ot-chip-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+/* banner picker */
+.ot-banner-option { display: flex; align-items: center; gap: 10px; }
+.ot-banner-option-img { width: 64px; height: 40px; object-fit: cover; border-radius: 5px; flex: none; background: var(--background-secondary); }
+.ot-banner-option-path { font-size: 11.5px; color: var(--text-faint); }
+
+/* hide Obsidian's own vault bar under the navigator (our footer replaces it) */
+.mod-left-split:has(.workspace-leaf:not([style*="display: none"]) > .workspace-leaf-content[data-type="typefold-view"]) .workspace-sidedock-vault-profile { display: none; }
+.ot-nav-foot { padding-bottom: 12px; }
+
+/* manual ordering */
+.ot-nav-row[draggable="true"] { position: relative; }
+.ot-nav-row.is-dragging { opacity: .4; }
+.ot-nav-row.ot-drop-before::before, .ot-nav-row.ot-drop-after::after {
+  content: ""; position: absolute; left: 6px; right: 6px; height: 2px; border-radius: 1px;
+  background: var(--interactive-accent);
+}
+.ot-nav-row.ot-drop-before::before { top: -1px; }
+.ot-nav-row.ot-drop-after::after { bottom: -1px; }
+
+/* folder tree inside a type */
+.ot-nav-row { position: relative; }
+.ot-chevron {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: auto;
+  border-radius: 4px; color: var(--text-faint); opacity: 0; transition: transform .12s, opacity .12s;
+}
+.ot-chevron svg { width: 13px; height: 13px; }
+.ot-nav-row:hover .ot-chevron, .ot-chevron.is-open { opacity: 1; }
+.ot-chevron.is-open { transform: rotate(90deg); }
+.ot-chevron:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-folder-row { height: 28px; font-size: 13.5px; color: var(--text-muted); gap: 8px; }
+.ot-folder-row.is-selected { color: var(--text-normal); }
+.ot-folder-icon { display: inline-flex; color: var(--text-faint); }
+.ot-folder-icon svg { width: 15px; height: 15px; }
+.ot-list-crumbs { display: flex; align-items: baseline; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.ot-crumb { color: var(--text-muted); cursor: pointer; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.ot-crumb:hover { color: var(--text-normal); }
+.ot-crumb.ot-list-title { color: var(--text-normal); cursor: default; font-size: 16px; }
+.ot-crumb-sep { color: var(--text-faint); }
+
+/* group headers in list pane */
+.ot-group { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+.ot-group:hover { color: var(--text-muted); }
+.ot-group-chev { display: inline-flex; transition: transform .12s; }
+.ot-group-chev svg { width: 12px; height: 12px; }
+.ot-group.is-collapsed .ot-group-chev { transform: rotate(-90deg); }
+.ot-group-count { font-weight: 400; letter-spacing: 0; opacity: .8; margin-left: 2px; }
+.ot-head-btn.is-active { color: var(--ot-accent); }
+.ot-group:not(.is-date) { text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--text-muted); }
+
+/* list header: title gets the full width, tools sit beside the search box */
+.ot-list-header { min-width: 0; }
+.ot-list-header .ot-list-title, .ot-list-crumbs { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-list-header .ot-spacer { display: none; }
+.ot-list-search-row { display: flex; align-items: center; gap: 2px; margin: 0 8px 6px 12px; }
+.ot-list-search-row .ot-list-search { flex: 1; min-width: 0; margin: 0 4px 0 0; }
+.ot-list-tools { display: flex; align-items: center; flex: none; }
+.ot-list-tools .ot-head-btn { padding: 4px; }
+
+/* ── group hierarchy: header = section row, items indented under a guide line ── */
+.ot-list .ot-group:not(.is-date) {
+  position: sticky; top: 0; z-index: 1;
+  margin: 10px 0 2px; padding: 7px 8px; border-radius: 7px;
+  font-size: 13px; font-weight: 600; color: var(--text-normal);
+  background: var(--background-secondary);
+  text-transform: none; letter-spacing: 0;
+}
+.ot-list .ot-group:not(.is-date):first-child { margin-top: 2px; }
+.ot-list .ot-group:not(.is-date):hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-group-icon { display: inline-flex; color: var(--ot-accent); }
+.ot-group-icon svg { width: 15px; height: 15px; }
+.ot-group-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-group-parent { color: var(--text-faint); font-weight: 500; }
+.ot-group:not(.is-date) .ot-group-count {
+  font-size: 11.5px; font-weight: 500; color: var(--text-muted);
+  background: var(--background-primary); border-radius: 10px; padding: 0 7px; line-height: 18px;
+}
+.ot-group:not(.is-date) + .ot-group-items {
+  margin-left: 15px; padding-left: 6px; border-left: 1.5px solid var(--background-modifier-border);
+}
+.ot-group:not(.is-date) + .ot-group-items > .ot-item { min-height: 52px; }
+.ot-group.is-date { padding-top: 14px; }
+
+/* nested folder groups */
+.ot-list .ot-folder-group { position: static; margin: 6px 0 2px; }
+.ot-list .ot-folder-group[data-depth="0"] { position: sticky; top: 0; z-index: 2; }
+.ot-list .ot-folder-group:not([data-depth="0"]) {
+  background: transparent; padding: 5px 8px; font-weight: 600; font-size: 12.5px;
+}
+.ot-list .ot-folder-group:not([data-depth="0"]):hover { background: var(--background-modifier-hover); }
+.ot-list .ot-folder-group:not([data-depth="0"]) .ot-group-icon { color: var(--text-muted); }
+.ot-folder-items { margin-left: 15px; padding-left: 6px; border-left: 1.5px solid var(--background-modifier-border); }
+.ot-folder-items:empty { display: none; }
+
+/* generated banner for folder notes */
+.ot-banner-generated {
+  --ot-color: var(--ot-accent);
+  position: relative; display: flex; align-items: flex-end; aspect-ratio: auto; height: 150px;
+  padding: 16px 20px;
+  background:
+    radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--ot-color) 35%, transparent), transparent 60%),
+    linear-gradient(135deg, color-mix(in srgb, var(--ot-color) 18%, var(--background-secondary)), var(--background-secondary));
+  border: 1px solid color-mix(in srgb, var(--ot-color) 18%, transparent);
+}
+.ot-banner-glyph { position: absolute; right: 22px; top: 50%; transform: translateY(-50%); color: color-mix(in srgb, var(--ot-color) 55%, transparent); }
+.ot-banner-glyph svg { width: 72px; height: 72px; stroke-width: 1.4; }
+.ot-banner-path { font-size: 13px; font-weight: 600; color: color-mix(in srgb, var(--ot-color) 60%, var(--text-normal)); letter-spacing: .01em; }
+.ot-folder-chip .ot-chip-icon { color: var(--text-muted); }
+
+/* hide / show the note list panel */
+.ot-list-close { margin-left: auto; flex: none; }
+.ot-list-close svg, .ot-list-toggle svg { width: 16px; height: 16px; }
+.ot-list-close-floating { position: absolute; top: 10px; right: 8px; }
+.ot-list-pane { position: relative; }
+.ot-list-toggle { flex: none; height: 30px; width: 30px; display: flex; align-items: center; justify-content: center; }
+.ot-list-closed .ot-nav-pane { flex: 1; width: auto !important; }
+
+/* section "+" (new type) */
+.ot-section-title { display: flex; align-items: center; }
+.ot-section-add { margin-left: auto; padding: 2px; opacity: 0; }
+.ot-section:hover .ot-section-add { opacity: 1; }
+.ot-section-add svg { width: 14px; height: 14px; }
+/* custom folder icons in the tree */
+.ot-folder-icon.ot-icon { width: 18px; height: 18px; border-radius: 5px; }
+.ot-folder-icon.ot-icon svg { width: 12px; height: 12px; }
+/* new type dialog */
+.ot-type-name { font-size: 15px; font-weight: 600; }
+.ot-newtype-info { font-size: 12.5px; color: var(--text-muted); margin: -2px 0 8px; }
+.ot-newtype-opts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+.ot-check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+.ot-folders-input { width: 100%; min-width: 220px; font-family: var(--font-monospace); font-size: 12px; }
+
+/* ───────── Home dashboard ───────── */
+.workspace-leaf-content[data-type="typefold-home"] > .view-content.ot-home-root { padding: 0; background: var(--background-primary); }
+.ot-home { max-width: 1040px; margin: 0 auto; padding: 44px 40px 60px; }
+.ot-home-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 34px; }
+.ot-home-head > div:first-child { flex: 1; min-width: 0; }
+.ot-home-hello { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+.ot-home-date { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+.ot-home-actions { display: flex; gap: 8px; }
+.ot-home-search { width: 240px; flex: none; }
+
+.ot-home-section { margin-bottom: 36px; }
+.ot-home-title { font-size: 13px; font-weight: 600; color: var(--text-muted); margin: 0 2px 12px; letter-spacing: .01em; }
+
+.ot-home-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.ot-home-type {
+  --ot-color: var(--ot-accent);
+  position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 12px;
+  border-radius: 12px; cursor: pointer; background: var(--background-primary);
+  border: 1px solid var(--ot-card-border); box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  transition: box-shadow .12s, transform .12s, border-color .12s;
+}
+.ot-home-type::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--ot-color) 9%, transparent), transparent 55%);
+}
+.ot-home-type:hover { box-shadow: 0 6px 18px rgba(0,0,0,.08); transform: translateY(-1px); border-color: color-mix(in srgb, var(--ot-color) 30%, var(--ot-card-border)); }
+.ot-home-type-top { display: flex; align-items: center; gap: 10px; }
+.ot-home-type-icon.ot-icon { width: 34px; height: 34px; border-radius: 9px; }
+.ot-home-type-icon.ot-icon svg { width: 18px; height: 18px; }
+.ot-home-type-name { flex: 1; min-width: 0; font-weight: 700; font-size: 15px; }
+.ot-home-type-count { font-weight: 400; font-size: 12px; color: var(--text-faint); margin-top: 1px; }
+.ot-home-type-add { opacity: 0; }
+.ot-home-type:hover .ot-home-type-add { opacity: 1; }
+.ot-home-type-recent { display: flex; flex-direction: column; gap: 1px; border-top: 1px solid var(--background-modifier-border); padding-top: 8px; }
+.ot-home-type-note {
+  font-size: 13px; color: var(--text-muted); padding: 3px 6px; margin: 0 -6px; border-radius: 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ot-home-type-note:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-home-type-note.is-empty { color: var(--text-faint); font-style: italic; }
+.ot-home-type-new {
+  align-items: center; justify-content: center; min-height: 130px; color: var(--text-faint);
+  border-style: dashed; box-shadow: none; background: transparent; font-size: 13.5px;
+}
+.ot-home-type-new::before { display: none; }
+.ot-home-type-new:hover { color: var(--text-normal); }
+.ot-home-type-new-icon svg { width: 20px; height: 20px; }
+
+.ot-home-recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.ot-home-card .ot-card-cover { aspect-ratio: 16 / 10; background: color-mix(in srgb, var(--ot-color, #8e8e93) 10%, var(--background-secondary)); }
+.ot-home-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; min-width: 0; }
+.ot-home-mini-chip {
+  --ot-color: #8e8e93;
+  display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 5px;
+  color: color-mix(in srgb, var(--ot-color) 75%, var(--text-normal));
+  background: color-mix(in srgb, var(--ot-color) 12%, transparent); flex: none;
+}
+.ot-home-mini-chip svg { width: 11px; height: 11px; }
+.ot-home-time { font-size: 11.5px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 700px) { .ot-home { padding: 24px 16px; } .ot-home-head { flex-direction: column; align-items: stretch; } .ot-home-search { width: auto; flex: 1; } }
+
+/* ── Home: bullets on type cards, one line each ── */
+.ot-home-type-note { position: relative; padding-left: 16px; display: block; }
+.ot-home-type-note::before {
+  content: ""; position: absolute; left: 6px; top: 50%; width: 4px; height: 4px; border-radius: 50%;
+  background: color-mix(in srgb, var(--ot-color) 70%, var(--text-faint)); transform: translateY(-50%);
+}
+.ot-home-type-note.is-empty::before { display: none; }
+
+/* section title tools */
+.ot-home-title { display: flex; align-items: center; gap: 6px; }
+.ot-home-viewtoggle { display: flex; margin-left: auto; background: var(--background-secondary); border-radius: 7px; padding: 2px; }
+.ot-home-viewtoggle .clickable-icon { padding: 3px 6px; }
+.ot-home-viewtoggle .clickable-icon.is-active { background: var(--background-primary); color: var(--text-normal); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.ot-home-viewtoggle svg, .ot-home-more svg { width: 14px; height: 14px; }
+.ot-home-title > span:first-child + .ot-home-more { margin-left: auto; }
+
+/* recently edited — list */
+.ot-home-list { display: flex; flex-direction: column; border: 1px solid var(--ot-card-border); border-radius: 12px; overflow: hidden; }
+.ot-home-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; min-width: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.ot-home-row:last-child { border-bottom: none; }
+.ot-home-row:hover { background: var(--background-modifier-hover); }
+.ot-home-row-icon.ot-icon { width: 24px; height: 24px; border-radius: 7px; }
+.ot-home-row-icon.ot-icon svg { width: 13px; height: 13px; }
+.ot-home-row-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 60px; }
+.ot-home-row-chips { display: flex; gap: 4px; flex: none; }
+.ot-home-row-path { flex: 1 1 0; min-width: 0; font-size: 12px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.ot-home-row .ot-home-time { flex: none; width: 92px; text-align: right; }
+.ot-home-hello { cursor: pointer; }
+.ot-home-weather { color: var(--text-muted); }
+.ot-tag-count { font-size: 11.5px; color: var(--text-faint); margin-left: auto; }
+@media (max-width: 700px) { .ot-home-row-path { display: none; } }
+
+/* palette button on folder rows (hover) */
+.ot-row-edit { padding: 2px; margin-left: auto; opacity: 0; flex: none; }
+.ot-row-edit svg { width: 13px; height: 13px; }
+.ot-folder-row:hover .ot-row-edit { opacity: 1; }
+.ot-folder-row .ot-chevron { margin-left: 0; }
+.ot-row-edit {
+  display: none; position: absolute; right: 26px; top: 50%; transform: translateY(-50%); margin: 0; opacity: 1;
+  background: var(--background-secondary); border-radius: 5px;
+}
+.ot-folder-row:not(.has-children) .ot-row-edit { right: 6px; }
+.ot-folder-row:hover .ot-row-edit { display: inline-flex; }
+.ot-folder-icon.ot-icon { color: var(--ot-color); }
+
+/* no-colour swatch */
+.ot-swatch-none {
+  background: var(--background-primary) !important;
+  box-shadow: inset 0 0 0 1.5px var(--background-modifier-border-hover);
+  position: relative; --ot-color: var(--text-muted);
+}
+.ot-swatch-none::after {
+  content: ""; position: absolute; left: 3px; right: 3px; top: 50%; height: 1.5px;
+  background: var(--color-red, #e5484d); transform: rotate(-45deg);
+}
+.ot-swatch-none.is-selected { box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--text-muted); }
+/* archive section */
+.ot-archive-section { margin-top: 14px; border-top: 1px solid var(--background-modifier-border); padding-top: 8px; }
+.ot-archived-row .ot-nav-label { color: var(--text-muted); }
+.ot-archived-row .ot-row-restore { right: 6px; }
+.ot-archived-row:hover .ot-row-restore { display: inline-flex; }
+
+/* properties: hidden by default, shown per note via the "N properties" chip */
+body.ot-hide-props .ot-object-note.ot-show-props .metadata-container { display: block !important; }
+body.ot-hide-props .ot-object-note.ot-show-props .pp-properties-container { display: block !important; }
+.ot-props-chip { color: var(--text-muted); font-weight: 500; }
+.ot-props-chip .ot-chip-icon { color: var(--text-faint); }
+.ot-props-chip.is-open { color: var(--text-normal); border-color: var(--ot-accent); background: color-mix(in srgb, var(--ot-accent) 8%, var(--background-primary)); }
+.ot-props-chip.is-open .ot-chip-icon { color: var(--ot-accent); }
+
+/* colour swatches: always one row */
+.ot-swatches { flex-wrap: nowrap; justify-content: space-between; gap: 6px; }
+.ot-swatch { width: 22px; height: 22px; flex: 0 0 22px; }
+
+/* ── less space above the banner on object / folder / type pages ── */
+.ot-object-note .markdown-source-view.mod-cm6 .cm-scroller { padding-top: 10px; }
+.ot-object-note .markdown-reading-view .markdown-preview-view { padding-top: 10px; }
+.ot-object-note .ot-banner { margin-top: 0; }
+.ot-object-note .ot-note-header { margin-top: 0; }
+.ot-folder-chip.has-color .ot-chip-icon { color: var(--ot-color); }
+
+/* default file explorer mode: hide the core File explorer tab */
+body.ot-replace-explorer .workspace-tab-header[data-type="file-explorer"] { display: none; }
+
+/* ── highlights always sit behind icons and text ── */
+.ot-nav-row, .ot-item, .ot-home-row { isolation: isolate; }
+.ot-nav-row > *, .ot-item > *, .ot-home-row > * { position: relative; z-index: 1; }
+.ot-nav-row > .ot-row-edit { position: absolute; z-index: 2; }
+.ot-nav-row.ot-drop-before::before, .ot-nav-row.ot-drop-after::after { z-index: 3; }
+/* solid icon tiles so a selected / hovered row can't wash them out */
+.ot-nav-row .ot-icon, .ot-list-header .ot-icon, .ot-home-row .ot-icon {
+  background: color-mix(in srgb, var(--ot-color) 16%, var(--background-primary));
+}
+.ot-nav-row.is-selected { background: var(--ot-highlight-strong); color: var(--text-normal); font-weight: 600; }
+.ot-nav-row.is-selected .ot-nav-label { color: var(--text-normal); }
+/* home type cards: gradient wash stays behind the content */
+.ot-home-type { isolation: isolate; }
+.ot-home-type::before { z-index: -1; }
+.ot-show-more { text-align: center; font-size: 12.5px; color: var(--text-muted); padding: 10px; cursor: pointer; border-radius: 7px; }
+.ot-show-more:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+/* files inside folders, in the tree */
+.ot-file-row { height: 26px; font-size: 13px; color: var(--text-muted); gap: 8px; }
+.ot-file-row:hover { color: var(--text-normal); }
+.ot-file-row.is-active-note { background: var(--ot-highlight-strong); color: var(--text-normal); font-weight: 500; }
+.ot-file-icon { display: inline-flex; color: var(--text-faint); flex: none; }
+.ot-file-icon svg { width: 14px; height: 14px; }
+.ot-file-row.is-active-note .ot-file-icon { color: var(--ot-accent); }
+
+/* Iconize icons inside the panel */
+.ot-iconize { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.ot-iconize svg { width: 15px !important; height: 15px !important; }
+.ot-icon.ot-iconize svg { width: 13px !important; height: 13px !important; }
+.ot-file-icon.ot-iconize svg { width: 14px !important; height: 14px !important; }
+
+/* ── note header layout: banner → icon → title → chips ── */
+.ot-note-top { margin: 0 0 4px; }
+.ot-note-top .ot-banner { margin: 0 0 22px; }
+.ot-object-note .iconize-title-icon { margin-top: 6px !important; margin-bottom: 22px !important; }
+.ot-object-note .inline-title { margin-top: 0 !important; margin-bottom: 0 !important; }
+.ot-note-chipsrow { margin: 16px 0 14px; }
+.ot-note-chipsrow .ot-chips { margin: 0; }
+
+/* page icon drawn by this plugin (when Iconize isn't used) */
+.ot-page-icon { color: var(--ot-color); margin: 6px 0 22px; line-height: 0; }
+.ot-page-icon svg { width: 48px; height: 48px; stroke-width: 1.6; }
+
+/* ── built-in view tabs for Bases ── */
+.ot-view-tabs { display: flex; align-items: center; gap: 2px; margin: 0 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.ot-view-tabs::-webkit-scrollbar { display: none; }
+.ot-view-tab {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 7px;
+  font-size: 12.5px; color: var(--text-muted); cursor: pointer; white-space: nowrap; flex: none;
+}
+.ot-view-tab:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-view-tab.is-active { background: color-mix(in srgb, var(--ot-accent) 14%, transparent); color: var(--ot-accent); font-weight: 600; }
+.ot-view-tab-icon { display: inline-flex; }
+.ot-view-tab-icon svg { width: 13px; height: 13px; }
+
+/* view tabs: left-aligned at the start of the Bases toolbar */
+/* directly after "N results", tools stay on the right */
+.bases-toolbar:has(> .ot-view-tabs) > .bases-toolbar-result-count { margin-right: 0 !important; flex: none; }
+.bases-toolbar > .ot-view-tabs { order: 0; margin: 0 auto 0 8px; justify-content: flex-start; flex: 0 1 auto; }
+
+/* coloured view tabs */
+.ot-view-tab.has-color .ot-view-tab-icon { color: var(--tab-color); }
+.ot-view-tab.has-color.is-active { background: color-mix(in srgb, var(--tab-color) 16%, transparent); color: color-mix(in srgb, var(--tab-color) 80%, var(--text-normal)); }
+.ot-view-tab.has-color:not(.is-active):hover { background: color-mix(in srgb, var(--tab-color) 10%, transparent); }
+/* "+" then "expand/collapse all", side by side at the right of the header */
+/* toggle-all, then "+", tight together at the right of the header */
+.ot-section-title .ot-toggle-all { margin-left: auto; }
+.ot-section-title .ot-toggle-all + .ot-section-add { margin-left: 0; }
+.ot-section-title .ot-section-add { padding: 2px 3px; }
+.ot-section-title .ot-section-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0 !important; border-radius: 5px;
+}
+.ot-section-title .ot-toggle-all + .ot-section-add { margin-left: 1px; }
+/* header buttons line up with the rows' right edge (rows have 8px side padding) */
+.ot-section > .ot-section-title { margin-right: 4px; }
+.ot-section-title .ot-section-add { width: 18px; height: 18px; }
+.ot-section-title .ot-toggle-all + .ot-section-add { margin-left: 3px; }
+
+/* ───────────────── Mobile (Obsidian adds body.is-mobile / body.is-phone) ───────────────── */
+/* 1. controls that only appeared on hover are always visible on touch */
+body.is-mobile .ot-section-add,
+body.is-mobile .ot-chevron,
+body.is-mobile .ot-home-type-add { opacity: 1 !important; }
+body.is-mobile .ot-chevron { color: var(--text-faint); }
+body.is-mobile .ot-row-edit,
+body.is-mobile .ot-archived-row .ot-row-restore {
+  display: inline-flex !important; position: static !important; transform: none !important;
+  background: transparent !important; margin-left: auto; opacity: .55;
+}
+body.is-mobile .ot-row-edit + .ot-chevron { margin-left: 2px; }
+
+/* 2. touch-sized targets */
+body.is-mobile .ot-nav-row { height: 42px; font-size: 16px; gap: 12px; padding: 0 10px; border-radius: 9px; }
+body.is-mobile .ot-nav-row .ot-icon { width: 26px; height: 26px; border-radius: 7px; }
+body.is-mobile .ot-nav-row .ot-icon svg { width: 16px; height: 16px; }
+body.is-mobile .ot-folder-row { height: 40px; font-size: 15px; }
+body.is-mobile .ot-file-row { height: 38px; font-size: 15px; }
+body.is-mobile .ot-folder-icon svg, body.is-mobile .ot-file-icon svg { width: 17px; height: 17px; }
+body.is-mobile .ot-chevron { width: 32px; height: 32px; border-radius: 8px; }
+body.is-mobile .ot-chevron svg { width: 16px; height: 16px; }
+body.is-mobile .ot-row-edit { width: 30px; height: 30px; justify-content: center; align-items: center; }
+body.is-mobile .ot-row-edit svg { width: 15px; height: 15px; }
+body.is-mobile .ot-section-title { font-size: 13px; margin-top: 4px; margin-bottom: 6px; }
+body.is-mobile .ot-section-title .ot-section-add { width: 30px; height: 30px; border-radius: 8px; }
+body.is-mobile .ot-section-title .ot-section-add svg { width: 17px; height: 17px; }
+body.is-mobile .ot-section-title .ot-toggle-all + .ot-section-add { margin-left: 4px; }
+body.is-mobile .ot-section { margin-top: 18px; }
+
+/* top bar: New / Search */
+body.is-mobile .ot-nav-top { padding: 12px 12px 8px; gap: 8px; }
+body.is-mobile .ot-new-btn, body.is-mobile .ot-search-btn { height: 40px; font-size: 15px; border-radius: 10px; }
+body.is-mobile .ot-kbd { display: none; }
+body.is-mobile .ot-list-toggle { width: 40px; height: 40px; }
+body.is-mobile .ot-scroll { padding: 2px 10px 24px; }
+
+/* footer */
+body.is-mobile .ot-nav-foot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+body.is-mobile .ot-foot-btn { width: 40px; height: 40px; }
+body.is-mobile .ot-foot-btn svg { width: 19px; height: 19px; }
+
+/* 3. note list (drill-down on phones) */
+body.is-mobile .ot-list-header { padding: 12px 12px 8px 8px; gap: 10px; }
+body.is-mobile .ot-back { width: 40px; height: 40px; }
+body.is-mobile .ot-back svg { width: 22px; height: 22px; }
+body.is-mobile .ot-list-title, body.is-mobile .ot-crumb.ot-list-title { font-size: 18px; }
+body.is-mobile .ot-list-close { width: 36px; height: 36px; }
+body.is-mobile .ot-list-search-row { margin: 0 10px 8px 12px; }
+body.is-mobile .ot-list-search { height: 40px; border-radius: 10px; }
+body.is-mobile .ot-list-search input { font-size: 16px; } /* 16px stops iOS zooming into the field */
+body.is-mobile .ot-list-tools .ot-head-btn { width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+body.is-mobile .ot-list-tools .ot-head-btn svg { width: 18px; height: 18px; }
+body.is-mobile .ot-item { min-height: 68px; padding: 10px; gap: 12px; }
+body.is-mobile .ot-item-title { font-size: 16px; }
+body.is-mobile .ot-item-meta { font-size: 13px; }
+body.is-mobile .ot-thumb { width: 52px; height: 52px; border-radius: 8px; }
+body.is-mobile .ot-list .ot-group:not(.is-date) { padding: 10px 10px; font-size: 14px; }
+body.is-mobile .ot-show-more { padding: 14px; font-size: 14px; }
+
+/* 4. Home on phones */
+body.is-phone .ot-home { padding: 20px 14px 40px; }
+body.is-phone .ot-home-hello { font-size: 25px; }
+body.is-phone .ot-home-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 24px; }
+body.is-phone .ot-home-actions { width: 100%; }
+body.is-phone .ot-home-search { flex: 1; width: auto; height: 40px; }
+body.is-phone .ot-home-types { grid-template-columns: 1fr 1fr; gap: 10px; }
+body.is-phone .ot-home-type { padding: 12px; gap: 8px; }
+body.is-phone .ot-home-type-icon.ot-icon { width: 30px; height: 30px; }
+body.is-phone .ot-home-type-name { font-size: 14px; }
+body.is-phone .ot-home-type-note { font-size: 12.5px; }
+body.is-phone .ot-home-row { padding: 12px; min-height: 52px; }
+body.is-phone .ot-home-row-path { display: none; }
+body.is-phone .ot-home-row .ot-home-time { width: auto; }
+body.is-phone .ot-home-recent { grid-template-columns: 1fr 1fr; }
+
+/* 5. note header on phones */
+body.is-phone .ot-banner { border-radius: 8px; }
+body.is-phone .ot-banner-generated { height: 110px; padding: 12px 14px; }
+body.is-phone .ot-banner-glyph svg { width: 52px; height: 52px; }
+body.is-phone .ot-chips { gap: 6px; }
+body.is-phone .ot-chip { height: 30px; font-size: 13px; }
+body.is-phone .ot-chip-btn { width: 32px; height: 32px; opacity: 1; }
+body.is-phone .ot-rel-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* 6. view tabs: scroll sideways instead of squeezing */
+body.is-mobile .ot-view-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+body.is-mobile .ot-view-tab { height: 30px; padding: 0 11px; font-size: 13.5px; }
+
+/* 7. dialogs fit the screen */
+body.is-phone .ot-config-modal { width: auto; }
+body.is-phone .ot-icon-grid { grid-template-columns: repeat(7, 1fr); max-height: 38vh; }
+body.is-phone .ot-swatches { flex-wrap: wrap; justify-content: flex-start; gap: 10px; }
+body.is-phone .ot-swatch { width: 28px; height: 28px; flex: 0 0 28px; }
+
+/* ───────── new-tab search panel ───────── */
+.ot-qo-container .modal-bg { background: color-mix(in srgb, var(--background-primary) 35%, transparent); }
+.modal.ot-qo {
+  width: min(980px, 92vw); max-width: none; height: min(680px, 82vh); padding: 0; overflow: hidden;
+  border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.18), 0 0 0 1px var(--background-modifier-border);
+  display: flex; flex-direction: column;
+}
+.modal.ot-qo .modal-close-button { display: none; }
+.modal.ot-qo .modal-content { display: flex; flex-direction: column; height: 100%; padding: 0; }
+.ot-qo-top { display: flex; align-items: center; gap: 12px; padding: 18px 20px 10px; }
+.ot-qo-search-icon { color: var(--text-muted); display: inline-flex; }
+.ot-qo-search-icon svg { width: 20px; height: 20px; }
+.ot-qo-top input { flex: 1; border: none !important; box-shadow: none !important; background: transparent !important; font-size: 19px; padding: 0; height: 32px; }
+.ot-qo-toggle svg { width: 18px; height: 18px; color: var(--ot-accent); }
+.ot-qo-filters { display: flex; gap: 6px; padding: 0 16px 10px; }
+.ot-qo-filter { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; color: var(--text-muted); cursor: pointer; }
+.ot-qo-filter svg { width: 14px; height: 14px; }
+.ot-qo-filter:hover { background: var(--background-modifier-hover); }
+.ot-qo-filter.is-on { color: var(--ot-accent); background: color-mix(in srgb, var(--ot-accent) 10%, transparent); }
+.ot-qo-caret svg { width: 12px; height: 12px; }
+.ot-qo-body { flex: 1; display: flex; gap: 12px; min-height: 0; padding: 0 12px 12px; }
+.ot-qo-list { flex: 1.25; overflow-y: auto; padding: 2px; min-width: 0; }
+.ot-qo-preview { flex: 1; min-width: 0; display: flex; }
+.ot-qo.no-preview .ot-qo-preview { display: none; }
+.ot-qo-group { font-size: 12.5px; color: var(--text-faint); font-weight: 600; padding: 14px 12px 6px; }
+.ot-qo-row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 9px; cursor: pointer; min-width: 0; }
+.ot-qo-row.is-selected { background: var(--background-modifier-hover); }
+.ot-qo-icon { display: inline-flex; width: 20px; justify-content: center; color: var(--text-muted); flex: none; }
+.ot-qo-icon svg { width: 17px; height: 17px; }
+.ot-qo-title { font-size: 15px; font-weight: 500; color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.ot-qo-crumb { font-size: 13px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; min-width: 40px; }
+.ot-qo-row.is-new .ot-qo-title { font-weight: 600; }
+.ot-qo-empty { color: var(--text-faint); padding: 16px 12px; font-size: 14px; }
+.ot-qo-card {
+  flex: 1; border-radius: 12px; border: 1px solid var(--background-modifier-border); background: var(--background-primary);
+  padding: 22px 24px; overflow: hidden; display: flex; flex-direction: column; gap: 8px; position: relative;
+}
+.ot-qo-card-cover { margin: -22px -24px 6px; height: 120px; overflow: hidden; }
+.ot-qo-card-cover img { width: 100%; height: 100%; object-fit: cover; }
+.ot-qo-card-icon { color: var(--text-normal); display: inline-flex; margin-top: 18px; }
+.ot-qo-card-icon svg { width: 34px; height: 34px; stroke-width: 1.7; }
+.ot-qo-card-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.ot-qo-card-path { font-size: 12.5px; color: var(--text-faint); }
+.ot-qo-card-title { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; }
+.ot-qo-card-sub { color: var(--text-muted); }
+.ot-qo-card-snippet { font-size: 13.5px; color: var(--text-muted); line-height: 1.55; white-space: pre-line; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 9; -webkit-box-orient: vertical; }
+.ot-qo-card-meta { margin-top: auto; font-size: 12px; color: var(--text-faint); }
+.ot-qo-foot { display: flex; gap: 18px; padding: 10px 20px; border-top: 1px solid var(--background-modifier-border); font-size: 12.5px; color: var(--text-muted); }
+.ot-qo-hint { display: inline-flex; align-items: center; gap: 6px; }
+.ot-qo-key { font-size: 11.5px; color: var(--text-faint); background: var(--background-secondary); border-radius: 5px; padding: 1px 6px; }
+body.is-phone .modal.ot-qo { width: 100vw; height: 92vh; border-radius: 14px 14px 0 0; }
+body.is-phone .ot-qo-foot { display: none; }

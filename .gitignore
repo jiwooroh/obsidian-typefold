@@ -1,0 +1,16 @@
+node_modules/
+data.json
+.DS_Store
+demo-vault/.obsidian/workspace*.json
+demo-vault/.obsidian/plugins/*/data.json
+# demo vault: don't redistribute other people's themes/plugins
+demo-vault/.obsidian/themes/
+demo-vault/.obsidian/plugins/*
+!demo-vault/.obsidian/plugins/typefold/
+demo-vault/.obsidian/plugins/typefold/main.js
+demo-vault/.obsidian/plugins/typefold/styles.css
+demo-vault/.obsidian/plugins/typefold/manifest.json
+!demo-vault/.obsidian/plugins/typefold/data.json
+demo-vault/.trash/
+docs/reddit-post.md
+.github/

@@ -1,0 +1,151 @@
+{
+  "property": "type",
+  "minCount": 1,
+  "sortTypes": "manual",
+  "typeOrder": [
+    "people",
+    "books",
+    "projects",
+    "papers",
+    "school",
+    "templates"
+  ],
+  "expanded": {
+    "school": true,
+    "fold:school::School/2026-1": true,
+    "books": true
+  },
+  "openBaseOnClick": true,
+  "basesFolder": "Typefold",
+  "sortNotes": "modified",
+  "listMode": "list",
+  "showFiles": true,
+  "showSmart": true,
+  "showCounts": false,
+  "defaultFolder": "",
+  "navWidth": 230,
+  "hideProperties": true,
+  "showBanner": true,
+  "showRelated": true,
+  "linkIcons": true,
+  "themeTweaks": true,
+  "autoFolderNotes": true,
+  "devAutoReload": false,
+  "autoReveal": true,
+  "viewTabs": true,
+  "iconize": "ignore",
+  "replaceExplorer": true,
+  "smartItems": [
+    "smart:home",
+    "smart:inbox",
+    "smart:calendar"
+  ],
+  "openHomeOnStartup": true,
+  "newTabSearch": true,
+  "userName": "Alex",
+  "showWeather": true,
+  "weatherPlace": "San Francisco",
+  "weatherLat": 37.7749,
+  "weatherLon": -122.4194,
+  "home": {
+    "recentView": "list",
+    "recentCount": 8,
+    "typeNotes": 3,
+    "showTypeChips": true
+  },
+  "pinned": [],
+  "types": {
+    "people": {
+      "label": "People",
+      "icon": "user",
+      "color": "#007AFF",
+      "folders": [
+        "People"
+      ],
+      "registered": true
+    },
+    "books": {
+      "label": "Books",
+      "icon": "book-open",
+      "color": "#FF9500",
+      "folders": [
+        "Books"
+      ],
+      "registered": true,
+      "columns": [
+        "author",
+        "year",
+        "status",
+        "rating"
+      ],
+      "defaultProps": {
+        "status": "To read",
+        "created": "{{date}}"
+      }
+    },
+    "projects": {
+      "label": "Projects",
+      "icon": "folder-kanban",
+      "color": "#34C759",
+      "folders": [
+        "Projects"
+      ],
+      "registered": true,
+      "defaultProps": {
+        "status": "Planning"
+      }
+    },
+    "papers": {
+      "label": "Papers",
+      "icon": "file-text",
+      "color": "#AF52DE",
+      "folders": [
+        "Papers"
+      ],
+      "registered": true,
+      "columns": [
+        "authors",
+        "year",
+        "venue",
+        "status"
+      ]
+    },
+    "school": {
+      "label": "School",
+      "icon": "graduation-cap",
+      "color": "#5856D6",
+      "folders": [
+        "School"
+      ],
+      "registered": true,
+      "folderProps": [
+        {
+          "name": "semester",
+          "match": "^\\d{4}-\\d$"
+        },
+        {
+          "name": "course"
+        }
+      ],
+      "defaultProps": {
+        "date": "{{date}}"
+      }
+    },
+    "templates": {
+      "label": "Templates",
+      "icon": "layout-template",
+      "color": "#8E8E93",
+      "folders": [
+        "Templates"
+      ],
+      "registered": true,
+      "section": "files"
+    }
+  },
+  "folderTypesV": 2,
+  "welcomed": true,
+  "listClosed": true,
+  "lastSelected": "books",
+  "listPrefs": {},
+  "sidebarWide": 530
+}

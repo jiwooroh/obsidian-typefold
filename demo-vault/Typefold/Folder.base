@@ -1,0 +1,13 @@
+filters:
+  and:
+    - file.inFolder(this.file.folder)
+    - file.name != this.file.name
+    - file.basename != file.folder.split("/")[-1]
+views:
+  - type: bases
+    name: View
+    groupBy:
+      property: file.folder
+      direction: ASC
+    propertyLabelDisplay: icon-name
+    groupColorDisplay: label
