@@ -11,7 +11,9 @@ Register a folder as a type (People, Books, Projects, School…) and Typefold gi
 ### Sidebar navigator
 - Your types, each with its own icon and colour, and the full folder tree under each — subfolders, sub-subfolders and the files in them.
 - An optional second panel lists the selected type or folder: sort by title / created / edited, group by date, folder (nested) or any property.
+- Choose what each list row shows: a two-line preview of the note (on by default), its tags, and any properties you pick.
 - Expand / collapse everything in one click, drag to reorder types, archive what you don't need to see.
+- **Favorites**: everything you bookmark with the core Bookmarks plugin, in a Favorites row that opens like a folder.
 - Can replace the core File explorer (breadcrumbs and "Reveal file" open here too).
 
 ![Sidebar and type page](docs/sidebar.png)
@@ -30,6 +32,7 @@ Register a folder as a type (People, Books, Projects, School…) and Typefold gi
 
 ### Home dashboard and new-tab search
 - **Home**: a greeting that changes with the time, the day and the weather, every type as a card, and recently edited notes as a list or cards.
+- **Home as a note**: put an empty ` ```typefold-home ``` ` code block in any note (for example `Home.md`) and the same dashboard appears there, so you can link to it, bookmark it, or set it as your start page with another plugin.
 - **Calendar**: a month calendar at the top of the note list, with your daily notes listed newest first underneath. Days with a note get a dot; click a day to open its note or create it from your core Daily notes folder, format and template.
 - **New tab (⌘T)**: a search panel — recent notes grouped by date, fuzzy search, filter by type, preview on the right. `↵` open · `⌘↵` new tab · `⌘L` copy link.
 

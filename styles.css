@@ -25,7 +25,8 @@ body {
 .ot-icon svg { width: 13px; height: 13px; stroke-width: 2; }
 
 /* ───────── navigator layout ───────── */
-body .workspace-split .workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root.ot-root {
+/* not limited to .workspace-split: on iOS/Android the sidebar is a .workspace-drawer */
+body .workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root.ot-root.ot-root {
   padding: 0; display: flex; height: 100%; overflow: hidden;
 }
 .ot-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; }
@@ -89,12 +90,12 @@ body .workspace-split .workspace-leaf-content[data-type="typefold-view"] > .view
 .ot-list-search {
   display: flex; align-items: center; gap: 6px; margin: 0 12px 6px; height: 30px; padding: 0 10px;
   background: var(--background-modifier-form-field, var(--background-secondary)); border-radius: 8px;
-  color: var(--text-faint);
+  color: var(--text-faint); overflow: hidden;
 }
 .ot-list-search svg { width: 14px; height: 14px; }
 .ot-list-search input[type="text"], .ot-list-search input[type="text"]:focus, .ot-list-search input[type="text"]:hover {
-  flex: 1; border: none; background: transparent; box-shadow: none;
-  padding: 0; height: 100%; font-size: 13.5px;
+  flex: 1; min-width: 0; width: 100%; border: none; background: transparent; box-shadow: none;
+  padding: 0; height: 100%; font-size: 13.5px; text-overflow: ellipsis;
 }
 
 .ot-list { flex: 1; overflow-y: auto; padding: 0 8px 16px; }
@@ -116,7 +117,20 @@ body .workspace-split .workspace-leaf-content[data-type="typefold-view"] > .view
 .ot-item.is-active::after, .ot-item:hover::after { display: none; }
 .ot-item-text { flex: 1; min-width: 0; }
 .ot-item-title { font-weight: 600; font-size: 14px; color: var(--text-normal); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ot-item-meta { font-size: 12px; color: var(--text-faint); margin-top: 3px; }
+.ot-item-meta { font-size: 12px; color: var(--text-faint); margin-top: 3px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.ot-item-preview {
+  font-size: 12.5px; line-height: 1.4; color: var(--text-muted); margin-top: 2px;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--ot-lines, 2); overflow: hidden; overflow-wrap: anywhere;
+}
+.ot-item-prop { color: var(--text-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-item-prop::before { content: "·"; margin-right: 8px; color: var(--text-faint); }
+.ot-item-tag { color: var(--ot-link); font-size: 11.5px; }
+/* file type (PDF, DOCX, …): small, at the bottom right of the row */
+.ot-ext-badge {
+  margin-left: auto; padding: 0 4px; border-radius: 3px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .03em; line-height: 16px;
+  color: var(--text-muted); background: var(--background-modifier-hover); border: 1px solid var(--background-modifier-border-hover, var(--background-modifier-border));
+}
 .ot-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; flex: none; box-shadow: 0 0 0 1px var(--ot-card-border); }
 .ot-list-empty { margin: auto; }
 
@@ -128,6 +142,7 @@ body .workspace-split .workspace-leaf-content[data-type="typefold-view"] > .view
 .ot-grid-card::after { display: none; }
 .ot-grid-card .ot-card-cover { aspect-ratio: 1; border-radius: 6px; }
 .ot-grid-card .ot-card-title { font-size: 12.5px; }
+.ot-card-ext { display: flex; margin-top: 3px; }
 
 /* ───────── cards (shared) ───────── */
 .ot-card-cover { overflow: hidden; background: var(--background-secondary); display: flex; align-items: center; justify-content: center; }
@@ -160,8 +175,8 @@ body .workspace-split .workspace-leaf-content[data-type="typefold-view"] > .view
 .ot-collection:hover { text-decoration: underline; }
 .ot-dot { color: var(--text-faint); margin: 0 -1px; }
 .ot-object-note .inline-title { font-size: 2.15em; font-weight: 800; letter-spacing: -0.02em; margin-top: 6px; }
-body.ot-hide-props .workspace-leaf-content .ot-object-note .metadata-container,
-body.ot-hide-props .workspace-leaf-content .ot-object-note .pp-properties-container { display: none !important; }
+body.ot-hide-props .workspace-leaf-content.ot-object-note .metadata-container,
+body.ot-hide-props .workspace-leaf-content.ot-object-note .pp-properties-container { display: none !important; }
 
 /* ───────── object note: related ───────── */
 .ot-related { margin: 40px 0 24px; padding-top: 14px; border-top: 1px solid var(--background-modifier-border); }
@@ -392,6 +407,9 @@ body.ot-nav-shown .workspace-split.mod-left-split .workspace-sidedock-vault-prof
 /* ───────── Home dashboard ───────── */
 .workspace-leaf-content[data-type="typefold-home"] > .view-content.ot-home-root { padding: 0; background: var(--background-primary); }
 .ot-home { max-width: 1040px; margin: 0 auto; padding: 44px 40px 60px; }
+/* inside a note (```typefold-home```) the note already has its own padding */
+.ot-home-embed .ot-home { max-width: none; padding: 8px 0 20px; }
+.markdown-rendered .ot-home-embed .ot-home-hello { margin: 0; }
 .ot-home-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 34px; }
 .ot-home-head > div:first-child { flex: 1; min-width: 0; }
 .ot-home-hello { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
@@ -405,7 +423,7 @@ body.ot-nav-shown .workspace-split.mod-left-split .workspace-sidedock-vault-prof
 .ot-home-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .ot-home-type {
   --ot-color: var(--ot-accent);
-  position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 12px;
+  min-width: 0; position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 12px;
   border-radius: 12px; cursor: pointer; background: var(--background-primary);
   border: 1px solid var(--ot-card-border); box-shadow: 0 1px 3px rgba(0,0,0,.04);
   transition: box-shadow .12s, transform .12s, border-color .12s;
@@ -516,8 +534,8 @@ body.ot-nav-shown .workspace-split.mod-left-split .workspace-sidedock-vault-prof
 .ot-archived-row:hover .ot-row-restore { display: inline-flex; }
 
 /* properties: hidden by default, shown per note via the "N properties" chip */
-body.ot-hide-props .workspace-leaf-content .ot-object-note.ot-show-props .metadata-container { display: block !important; }
-body.ot-hide-props .workspace-leaf-content .ot-object-note.ot-show-props .pp-properties-container { display: block !important; }
+body.ot-hide-props .workspace-leaf-content.ot-object-note.ot-show-props .metadata-container { display: block !important; }
+body.ot-hide-props .workspace-leaf-content.ot-object-note.ot-show-props .pp-properties-container { display: block !important; }
 .ot-props-chip { color: var(--text-muted); font-weight: 500; }
 .ot-props-chip .ot-chip-icon { color: var(--text-faint); }
 .ot-props-chip.is-open { color: var(--text-normal); border-color: var(--ot-accent); background: color-mix(in srgb, var(--ot-accent) 8%, var(--background-primary)); }
@@ -681,7 +699,8 @@ body.is-mobile .ot-list-toggle { width: 40px; height: 40px; }
 body.is-mobile .ot-scroll { padding: 2px 10px 24px; }
 
 /* footer */
-body.is-mobile .ot-nav-foot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+/* phone/tablet: Obsidian's drawer already has its own vault bar, so drop ours */
+body.is-mobile .ot-nav-foot { display: none; }
 body.is-mobile .ot-foot-btn { width: 40px; height: 40px; }
 body.is-mobile .ot-foot-btn svg { width: 19px; height: 19px; }
 
@@ -699,6 +718,7 @@ body.is-mobile .ot-list-tools .ot-head-btn svg { width: 18px; height: 18px; }
 body.is-mobile .ot-item { min-height: 68px; padding: 10px; gap: 12px; }
 body.is-mobile .ot-item-title { font-size: 16px; }
 body.is-mobile .ot-item-meta { font-size: 13px; }
+body.is-mobile .ot-item-preview { font-size: 14px; }
 body.is-mobile .ot-thumb { width: 52px; height: 52px; border-radius: 8px; }
 body.is-mobile .ot-list .ot-group:not(.is-date) { padding: 10px 10px; font-size: 14px; }
 body.is-mobile .ot-show-more { padding: 14px; font-size: 14px; }
@@ -709,7 +729,9 @@ body.is-phone .ot-home-hello { font-size: 25px; }
 body.is-phone .ot-home-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 24px; }
 body.is-phone .ot-home-actions { width: 100%; }
 body.is-phone .ot-home-search { flex: 1; width: auto; height: 40px; }
-body.is-phone .ot-home-types { grid-template-columns: 1fr 1fr; gap: 10px; }
+/* minmax(0, 1fr): a plain 1fr column grows to fit long note titles and runs off the screen */
+body.is-phone .ot-home-types { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+body.is-phone .ot-home-type, body.is-phone .ot-home-card { min-width: 0; }
 body.is-phone .ot-home-type { padding: 12px; gap: 8px; }
 body.is-phone .ot-home-type-icon.ot-icon { width: 30px; height: 30px; }
 body.is-phone .ot-home-type-name { font-size: 14px; }
@@ -717,7 +739,7 @@ body.is-phone .ot-home-type-note { font-size: 12.5px; }
 body.is-phone .ot-home-row { padding: 12px; min-height: 52px; }
 body.is-phone .ot-home-row-path { display: none; }
 body.is-phone .ot-home-row .ot-home-time { width: auto; }
-body.is-phone .ot-home-recent { grid-template-columns: 1fr 1fr; }
+body.is-phone .ot-home-recent { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 /* 5. note header on phones */
 body.is-phone .ot-banner { border-radius: 8px; }
@@ -726,7 +748,7 @@ body.is-phone .ot-banner-glyph svg { width: 52px; height: 52px; }
 body.is-phone .ot-chips { gap: 6px; }
 body.is-phone .ot-chip { height: 30px; font-size: 13px; }
 body.is-phone .ot-chip-btn { width: 32px; height: 32px; opacity: 1; }
-body.is-phone .ot-rel-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+body.is-phone .ot-rel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 
 /* 6. view tabs: scroll sideways instead of squeezing */
 body.is-mobile .ot-view-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }

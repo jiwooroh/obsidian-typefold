@@ -1,6 +1,6 @@
 /* Typefold — folders as object types: navigator, type pages, Home, new-tab search, view tabs for Bases (plain JS) */
 const {
-  Plugin, ItemView, PluginSettingTab, Setting, Modal, SuggestModal, Notice, AbstractInputSuggest, TFolder, Menu, MarkdownView, Platform,
+  Plugin, ItemView, PluginSettingTab, Setting, Modal, SuggestModal, Notice, MarkdownRenderChild, AbstractInputSuggest, TFolder, Menu, MarkdownView, Platform,
   Keymap, setIcon: obsidianSetIcon, getIconIds, prepareFuzzySearch, debounce, normalizePath, moment, editorInfoField, getAllTags, requestUrl,
 } = require("obsidian");
 const { ViewPlugin, Decoration, WidgetType } = require("@codemirror/view");
@@ -89,6 +89,7 @@ const ICON_GUESS = [
 const THUMB_KEYS = ["cover", "banner", "image", "thumbnail", "photo", "poster"];
 const HIDDEN_SUBTITLE_KEYS = ["tags", "tag", "aliases", "alias", "cssclasses", "cssclass", "collections", "created", "modified", "updated", "date created", "date modified", ...THUMB_KEYS];
 const IMG_EXT = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
+const DOC_EXT = ["pdf", "docx", "doc", "xlsx", "xls", "csv", "pptx", "ppt", "hwp", "hwpx", "txt", "epub", "key", "pages", "numbers"];
 const FILE_COLLECTIONS = [
   { key: "file:images", label: "Images", icon: "image", color: "#32ADE6", ext: IMG_EXT },
   { key: "file:pdfs", label: "PDFs", icon: "file-text", color: "#FF3B30", ext: ["pdf"] },
@@ -127,6 +128,7 @@ const DEFAULT_SETTINGS = {
   sortNotes: "modified",
   listMode: "list",
   showFiles: true,
+  showFavorites: true,
   showSmart: true,
   showCounts: false,
   defaultFolder: "",
@@ -212,6 +214,9 @@ class TypefoldPlugin extends Plugin {
     ICONIZE_API = () => this.app.plugins?.plugins?.["obsidian-icon-folder"]?.api || null;
     this.registerView(VIEW_TYPE, (leaf) => new TypefoldView(leaf, this));
     this.registerView(HOME_VIEW, (leaf) => new HomeView(leaf, this));
+    // ```typefold-home``` in any note draws the Home dashboard there (e.g. a Home.md)
+    this.homeEmbeds = new Set();
+    this.registerMarkdownCodeBlockProcessor("typefold-home", (src, el, ctx) => ctx.addChild(new HomeEmbed(el, this)));
     this.addRibbonIcon("house", "Home", () => this.openHome());
     this.addCommand({ id: "open-home", name: "Open home dashboard", callback: () => this.openHome() });
     this.addCommand({ id: "quick-open", name: "Search and open a page…", callback: () => new QuickOpenModal(this, null).open() });
@@ -281,6 +286,8 @@ class TypefoldPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       this.registerEvent(this.app.vault.on("create", (f) => { if (f instanceof TFolder) this.onFolderCreated(f); }));
       this.setupViewTabs();
+      const bmi = this.app.internalPlugins?.getPluginById?.("bookmarks")?.instance;
+      if (bmi?.on) this.registerEvent(bmi.on("changed", () => this.refreshViews()));
       this.rebuild();
       this.cleanupLeaves();
       setTimeout(() => this.cleanupLeaves(), 1200);
@@ -679,6 +686,17 @@ class TypefoldPlugin extends Plugin {
     if (file.parent) this.quietReveal(view, file.parent.path, file);
   }
 
+  /** the panel key for a folder inside a registered type (the type itself for its root), or null */
+  folderSelectKey(path) {
+    let best = null, bestLen = -1;
+    for (const k of Object.keys(this.settings.types)) {
+      if (k.includes(":") || !this.settings.types[k].registered || this.settings.types[k].hidden) continue;
+      for (const f of this.typeFolders(k)) if ((path === f || path.startsWith(f + "/")) && f.length > bestLen) { best = k; bestLen = f.length; }
+    }
+    if (!best) return null;
+    return path === this.typeRoot(best) ? best : this.folderKey(best, path);
+  }
+
   /** expand the tree down to (and including) a folder; returns true if anything changed */
   expandTo(path) {
     if (!path) return false;
@@ -957,7 +975,7 @@ class TypefoldPlugin extends Plugin {
       return c.get(key);
     }
     const fk = this.parseFolderKey(key);
-    if (fk) return (this.index.get(fk.type)?.files || []).filter((f) => f.path.startsWith(fk.path + "/"));
+    if (fk) return [...(this.index.get(fk.type)?.files || []).filter((f) => f.path.startsWith(fk.path + "/")), ...this.nonNoteFiles([fk.path])];
     if (key === "smart:inbox") {
       const root = normalizePath(this.settings.basesFolder || "Typefold") + "/";
       return this.app.vault.getMarkdownFiles().filter((f) => !this.fileType.has(f.path) && !f.path.startsWith(root));
@@ -965,7 +983,17 @@ class TypefoldPlugin extends Plugin {
     if (key === "smart:tasks") return this.app.vault.getMarkdownFiles().filter((f) =>
       (this.app.metadataCache.getFileCache(f)?.listItems || []).some((li) => li.task === " "));
     if (key === "smart:calendar") return this.app.vault.getMarkdownFiles().filter((f) => this.dailyDate(f));
-    return this.index.get(key)?.files || [];
+    const notes = this.index.get(key)?.files || [];
+    return this.settings.types[key]?.registered ? [...notes, ...this.nonNoteFiles(this.typeFolders(key))] : notes;
+  }
+
+  /** PDFs, canvases, bases and images inside these folders (types only index notes, but the list should show them too) */
+  nonNoteFiles(folders) {
+    if (!folders.length) return [];
+    const show = ["canvas", "base", ...DOC_EXT, ...IMG_EXT];
+    const bases = normalizePath(this.settings.basesFolder || "Typefold") + "/";
+    return this.app.vault.getFiles().filter((f) => show.includes(f.extension.toLowerCase())
+      && !f.path.startsWith(bases) && folders.some((d) => f.path.startsWith(d + "/")));
   }
 
   /* ── object types: create / assign ── */
@@ -1526,6 +1554,7 @@ class TypefoldPlugin extends Plugin {
 
   refreshViews(activeOnly = false) {
     for (const leaf of this.app.workspace.getLeavesOfType(HOME_VIEW)) leaf.view?.render?.();
+    for (const h of this.homeEmbeds || []) h.render();
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       if (!(leaf.view instanceof TypefoldView)) continue;
       activeOnly ? leaf.view.markActive() : leaf.view.render();
@@ -1971,8 +2000,8 @@ class HomeView extends ItemView {
     const sb = actions.createDiv("ot-search-btn ot-home-search");
     setIcon(sb.createSpan("ot-search-icon"), "search");
     sb.createSpan({ cls: "ot-search-label", text: "Search notes" });
-    sb.createSpan({ cls: "ot-kbd", text: "⌘O" });
-    sb.onclick = () => this.app.commands.executeCommandById("switcher:open");
+    if (p.settings.newTabSearch) sb.createSpan({ cls: "ot-kbd", text: "⌘T" });
+    sb.onclick = () => new QuickOpenModal(p, null).open();
     const nb = actions.createDiv("ot-new-btn");
     setIcon(nb.createSpan(), "plus");
     nb.createSpan({ text: "New" });
@@ -2169,6 +2198,21 @@ class HomeView extends ItemView {
   }
 }
 
+/* Home drawn inside a note's ```typefold-home``` block: same rendering as HomeView */
+class HomeEmbed extends MarkdownRenderChild {
+  constructor(el, plugin) { super(el); this.plugin = plugin; this.app = plugin.app; this.contentEl = el; }
+  onload() {
+    this.contentEl.addClass("ot-home-root", "ot-home-embed");
+    this.plugin.homeEmbeds.add(this);
+    this.render();
+    this.registerInterval(window.setInterval(() => { this._greet = null; this.render(); }, 15 * 60 * 1000));
+  }
+  onunload() { this.plugin.homeEmbeds.delete(this); }
+}
+for (const k of Object.getOwnPropertyNames(HomeView.prototype)) {
+  if (!["constructor", "getViewType", "getDisplayText", "getIcon", "onOpen"].includes(k)) HomeEmbed.prototype[k] = HomeView.prototype[k];
+}
+
 class TypefoldView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
@@ -2284,8 +2328,9 @@ class TypefoldView extends ItemView {
     const search = top.createDiv("ot-search-btn");
     setIcon(search.createSpan("ot-search-icon"), "search");
     search.createSpan({ cls: "ot-search-label", text: "Search" });
-    search.createSpan({ cls: "ot-kbd", text: "⌘O" });
-    search.onclick = () => this.app.commands.executeCommandById("switcher:open");
+    if (this.plugin.settings.newTabSearch) search.createSpan({ cls: "ot-kbd", text: "⌘T" });
+    // Typefold's own search panel: the core Quick switcher may be turned off
+    search.onclick = () => new QuickOpenModal(this.plugin, null).open();
     if (this.plugin.settings.listClosed) {
       const open = top.createDiv("clickable-icon ot-list-toggle");
       setIcon(open, "panel-right-open");
@@ -2347,6 +2392,8 @@ class TypefoldView extends ItemView {
         }
       }
     }
+
+    if (p.settings.showFavorites) this.renderFavorites(scroll.querySelector(".ot-smart") || scroll.createDiv("ot-section ot-smart"));
 
     const ts = section("Object Types");
     const titleEl = ts.querySelector(".ot-section-title");
@@ -2418,6 +2465,98 @@ class TypefoldView extends ItemView {
       this.render();
     });
     btn("command", "Command palette", () => this.app.commands.executeCommandById("command-palette:open"));
+  }
+
+  /** "Favorites": the core Bookmarks list, drawn like subfolder rows */
+  renderFavorites(s) {
+    const p = this.plugin;
+    const bm = this.app.internalPlugins?.getPluginById?.("bookmarks");
+    const items = bm?.enabled ? bm.instance?.items || [] : [];
+    if (!items.length) return;
+    // a row like Home / Inbox / Calendar that opens and closes
+    const head = s.createDiv("ot-nav-row ot-fav-head");
+    paintIcon(head.createSpan(), "star", "#8E8E93");
+    head.createSpan({ cls: "ot-nav-label", text: "Favorites" });
+    if (p.settings.showCounts) head.createSpan({ cls: "ot-count", text: String(items.length) });
+    const open = !!p.settings.expanded["smart:favorites"];
+    const chev = head.createSpan("ot-chevron");
+    setIcon(chev, "chevron-right");
+    chev.toggleClass("is-open", open);
+    head.addClass("has-children");
+    head.onclick = async () => {
+      if (open) delete p.settings.expanded["smart:favorites"]; else p.settings.expanded["smart:favorites"] = true;
+      await p.saveSettings(false); this.render();
+    };
+    if (!open) return;
+    const active = this.app.workspace.getActiveFile()?.path;
+    const title = (it) => { try { return bm.instance.getItemTitle(it); } catch (e) { return it.title || it.path || it.query || "Bookmark"; } };
+    // right-click: remove the bookmark (and, for files, open it in a new tab)
+    const menuFor = (r, it, file) => {
+      r.oncontextmenu = (evt) => {
+        evt.preventDefault();
+        const m = new Menu();
+        if (file) m.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => this.app.workspace.getLeaf("tab").openFile(file)));
+        m.addItem((i) => i.setTitle(it.type === "group" ? "Remove group from Favorites" : "Remove from Favorites").setIcon("bookmark-minus")
+          .onClick(() => bm.instance.removeItem(it)));
+        m.showAtMouseEvent(evt);
+      };
+    };
+    const draw = (parent, list, depth) => {
+      for (const it of list) {
+        const r = parent.createDiv("ot-nav-row ot-folder-row ot-fav-row");
+        menuFor(r, it, null);
+        r.style.paddingLeft = `${8 + depth * 16}px`;
+        const ic = r.createSpan("ot-folder-icon");
+        const label = () => r.createSpan({ cls: "ot-nav-label", text: it.title || title(it) });
+        if (it.type === "group") {
+          setIcon(ic, "folder-heart");
+          label();
+          r.onclick = null;
+          draw(parent, it.items || [], depth + 1);
+          continue;
+        }
+        const f = it.path ? this.app.vault.getAbstractFileByPath(it.path) : null;
+        if (it.type === "folder" && f instanceof TFolder) {
+          const key = p.folderSelectKey(f.path);
+          const custom = key && p.settings.types[key];
+          const iz = p.iconizeInfo(f.path);
+          if (custom?.icon || custom?.color) paintIcon(ic, custom.icon || "folder", custom.color || NO_COLOR);
+          else if (!(iz && p.drawIconize(ic, iz))) setIcon(ic, "folder");
+          label();
+          if (key && key === this.selected) r.addClass("is-selected");
+          r.onclick = (evt) => {
+            if (key) return this.select(key);
+            const fn = p.folderNoteOf(f.path);
+            if (fn) p.openFromPanel(fn, evt); else bm.instance.openBookmark(it, Keymap.isModEvent(evt));
+          };
+          continue;
+        }
+        if (it.type === "file" && f && !(f instanceof TFolder)) {
+          const iz = p.iconizeInfo(f.path);
+          const own = p.settings.noteIcons?.[f.path];
+          if (!(iz && p.drawIconize(ic, iz))) {
+            if (own) paintIcon(ic, own.icon, own.color || NO_COLOR);
+            else setIcon(ic, f.extension === "md" ? "file-text" : f.extension === "canvas" ? "layout-dashboard" : f.extension === "base" ? "table" : f.extension === "pdf" ? "file-type" : "file");
+          }
+          label();
+          this.bindFile(r, f);
+          r.addClass("ot-file-row");
+          r.oncontextmenu = (evt) => this.noteMenu(evt, f, (m) => m.addItem((i) => {
+            i.setTitle("Remove from Favorites").setIcon("bookmark-minus").onClick(() => bm.instance.removeItem(it));
+            i.setSection?.("action");
+          }));
+          if (f.path === active) r.addClass("is-active-note");
+          if (it.subpath) r.onclick = (evt) => bm.instance.openBookmark(it, Keymap.isModEvent(evt));
+          continue;
+        }
+        // search, url, graph, or a file that no longer exists
+        setIcon(ic, it.type === "search" ? "search" : it.type === "url" ? "link" : it.type === "graph" ? "git-fork" : "bookmark");
+        label();
+        if (it.path && !f) r.addClass("is-missing");
+        r.onclick = (evt) => bm.instance.openBookmark(it, Keymap.isModEvent(evt));
+      }
+    };
+    draw(s, items, 1);
   }
 
   renderArchive(scroll) {
@@ -2495,7 +2634,7 @@ class TypefoldView extends ItemView {
     const p = this.plugin;
     const tf = folder && this.app.vault.getAbstractFileByPath(folder);
     if (!(tf instanceof TFolder)) return [];
-    const show = ["md", "canvas", "base", "pdf", ...IMG_EXT];
+    const show = ["md", "canvas", "base", ...DOC_EXT, ...IMG_EXT];
     const bases = normalizePath(p.settings.basesFolder || "Typefold") + "/";
     return tf.children
       .filter((c) => c.extension && show.includes(c.extension.toLowerCase()) && !p.isFolderNote(c) && !p.isArchived(c.path) && !c.path.startsWith(bases))
@@ -2515,7 +2654,7 @@ class TypefoldView extends ItemView {
       if (iz && p.drawIconize(ic, iz)) { r.createSpan({ cls: "ot-nav-label", text: f.extension === "md" ? f.basename : f.name }); this.bindFile(r, f); continue; }
       const ownIc = p.settings.noteIcons?.[f.path];
       if (ownIc) { paintIcon(ic, ownIc.icon, ownIc.color || NO_COLOR); r.createSpan({ cls: "ot-nav-label", text: f.basename }); this.bindFile(r, f); continue; }
-      const icon = f.extension === "md" ? "file-text" : f.extension === "canvas" ? "layout-dashboard" : f.extension === "base" ? "table" : f.extension === "pdf" ? "file-type" : "image";
+      const icon = f.extension === "md" ? "file-text" : f.extension === "canvas" ? "layout-dashboard" : f.extension === "base" ? "table" : f.extension === "pdf" ? "file-type" : IMG_EXT.includes(f.extension.toLowerCase()) ? "image" : "file";
       setIcon(ic, icon);
       r.createSpan({ cls: "ot-nav-label", text: f.extension === "md" ? f.basename : f.name });
       this.bindFile(r, f);
@@ -2566,6 +2705,13 @@ class TypefoldView extends ItemView {
           new NewTypeModal(p, { folder: path, label: path.split("/").pop() }).open()));
         const fnote = p.folderNoteOf(path);
         if (fnote) m.addItem((i) => i.setTitle("Open folder note").setIcon("file-text").onClick(() => this.app.workspace.getLeaf(false).openFile(fnote)));
+        const tf = this.app.vault.getAbstractFileByPath(path);
+        if (tf instanceof TFolder) {
+          m.addSeparator();
+          m.addItem((i) => i.setTitle("Rename…").setIcon("pencil").onClick(() => this.app.fileManager.promptForFileRename(tf)));
+          m.addItem((i) => { i.setTitle("Delete").setIcon("trash-2").onClick(() => this.app.fileManager.promptForFolderDeletion(tf)); i.setWarning?.(true); });
+          this.app.workspace.trigger("file-menu", m, tf, "file-explorer-context-menu", this.leaf);
+        }
         m.showAtMouseEvent(evt);
       };
       this.renderFolderTree(parent, typeKey, path, depth + 1, r);
@@ -2644,15 +2790,31 @@ class TypefoldView extends ItemView {
     menu.showAtMouseEvent(evt);
   }
 
-  noteMenu(evt, file) {
+  noteMenu(evt, file, extra) {
     const p = this.plugin;
+    const app = this.app;
     const m = new Menu();
-    m.addItem((i) => i.setTitle(p.isPinned("note", file.path) ? "Unpin" : "Pin").setIcon("pin").onClick(() => p.togglePin("note", file.path)));
+    const add = (section, title, icon, fn, warn) => m.addItem((i) => {
+      i.setTitle(title).setIcon(icon).onClick(fn);
+      i.setSection?.(section);
+      if (warn) i.setWarning?.(true);
+    });
+    // with the core File explorer's own items (new window, move, default app, Finder, copy path) added by "file-menu" below
+    add("open", "Open in new tab", "file-plus", () => app.workspace.getLeaf("tab").openFile(file));
+    add("open", "Open to the right", "separator-vertical", () => app.workspace.getLeaf("split").openFile(file));
+    add("action", p.isPinned("note", file.path) ? "Unpin" : "Pin", "pin", () => p.togglePin("note", file.path));
     const arch = p.isArchived(file.path);
-    m.addItem((i) => i.setTitle(arch ? "Unarchive" : "Archive").setIcon(arch ? "archive-restore" : "archive").onClick(() => p.setArchived(file.path, !arch)));
-    m.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => this.app.workspace.getLeaf("tab").openFile(file)));
-    m.addItem((i) => i.setTitle("Open to the right").setIcon("separator-vertical").onClick(() => this.app.workspace.getLeaf("split").openFile(file)));
-    this.app.workspace.trigger("file-menu", m, file, VIEW_TYPE, this.leaf);
+    add("action", arch ? "Unarchive" : "Archive", arch ? "archive-restore" : "archive", () => p.setArchived(file.path, !arch));
+    add("action", "Make a copy", "files", async () => {
+      const dir = file.parent && !file.parent.isRoot() ? file.parent.path + "/" : "";
+      const path = app.vault.getAvailablePath ? app.vault.getAvailablePath(dir + file.basename, file.extension) : dir + file.basename + " 1." + file.extension;
+      const copy = await app.vault.copy(file, path);
+      if (file.extension === "md") app.workspace.getLeaf(false).openFile(copy);
+    });
+    add("action", "Rename…", "pencil", () => app.fileManager.promptForFileRename(file));
+    extra?.(m);
+    add("danger", "Delete", "trash-2", () => app.fileManager.promptForDeletion(file), true);
+    app.workspace.trigger("file-menu", m, file, "file-explorer-context-menu", this.leaf);
     m.showAtMouseEvent(evt);
   }
 
@@ -2661,7 +2823,7 @@ class TypefoldView extends ItemView {
   prefKey(key) { const fk = this.plugin.parseFolderKey(key); return fk ? fk.type : key; }
   listPrefs(key) {
     const all = (this.plugin.settings.listPrefs ||= {});
-    const d = { sort: "edited", dir: "desc", group: "date" };
+    const d = { sort: "edited", dir: "desc", group: "date", preview: 2, tags: false, props: [] };
     return Object.assign(d, all[this.prefKey(key)] || {});
   }
   async setListPref(key, patch) {
@@ -2809,6 +2971,24 @@ class TypefoldView extends ItemView {
     });
     gb?.toggleClass("is-active", pr.group !== "none");
     if (isCal) hbtn("calendar-plus", "Open today's note", (evt) => p.openDaily(moment(), evt));
+    hbtn("sliders-horizontal", "Show in list", (evt) => {
+      const m = new Menu();
+      const label = (t) => m.addItem((i) => i.setTitle(t).setIsLabel?.(true) ?? i.setTitle(t).setDisabled(true));
+      label("Preview");
+      // preview is on (two lines) or off
+      m.addItem((i) => i.setTitle("Show").setChecked(pr.preview > 0).onClick(() => this.setListPref(key, { preview: 2 })));
+      m.addItem((i) => i.setTitle("None").setChecked(!(pr.preview > 0)).onClick(() => this.setListPref(key, { preview: 0 })));
+      m.addSeparator();
+      m.addItem((i) => i.setTitle("Tags").setIcon("hash").setChecked(!!pr.tags).onClick(() => this.setListPref(key, { tags: !pr.tags })));
+      const cands = [...new Set([...(pr.props || []), ...this.displayProps(files)])];
+      if (cands.length) { m.addSeparator(); label("Properties"); }
+      for (const k of cands) {
+        const on = (pr.props || []).includes(k);
+        m.addItem((i) => i.setTitle(k).setIcon("list").setChecked(on).onClick(() =>
+          this.setListPref(key, { props: on ? pr.props.filter((x) => x !== k) : [...(pr.props || []), k] })));
+      }
+      m.showAtMouseEvent(evt);
+    });
     hbtn(p.settings.listMode === "grid" ? "list" : "layout-grid", "Toggle list / grid", async () => {
       p.settings.listMode = p.settings.listMode === "grid" ? "list" : "grid";
       await p.saveSettings(false); this.render();
@@ -2836,8 +3016,8 @@ class TypefoldView extends ItemView {
       const put = (parent, f) => {
         if (shown >= limit) { hidden++; return; }
         shown++;
-        if (isCal && p.settings.listMode !== "grid") return this.renderItem(parent, f, p.dailyDate(f).format("dddd, LL"));
-        return p.settings.listMode === "grid" ? this.renderCard(parent, f, key) : this.renderItem(parent, f, metaTs(f));
+        if (isCal && p.settings.listMode !== "grid") return this.renderItem(parent, f, p.dailyDate(f).format("dddd, LL"), pr);
+        return p.settings.listMode === "grid" ? this.renderCard(parent, f, key) : this.renderItem(parent, f, metaTs(f), pr);
       };
       const finish = () => {
         if (!hidden) return;
@@ -2954,11 +3134,62 @@ class TypefoldView extends ItemView {
     };
   }
 
-  renderItem(listEl, file, ts) {
+  /** frontmatter properties these files use (candidates for "Show in list") */
+  displayProps(files) {
+    const cnt = new Map();
+    const skip = new Set([this.plugin.prop, "position", "tags", "aliases", "cssclasses", ...THUMB_KEYS]);
+    for (const f of files.slice(0, 400)) {
+      for (const k of Object.keys(this.app.metadataCache.getFileCache(f)?.frontmatter || {})) if (!skip.has(k)) cnt.set(k, (cnt.get(k) || 0) + 1);
+    }
+    return [...cnt.entries()].filter(([, c]) => c >= Math.max(1, files.length * 0.1)).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k);
+  }
+
+  /** plain-text start of a note for the list preview (cached per mtime) */
+  async previewText(file) {
+    this._previews ||= new Map();
+    const hit = this._previews.get(file.path);
+    if (hit && hit.mtime === file.stat.mtime) return hit.text;
+    if (file.extension !== "md") return "";
+    let body = await this.app.vault.cachedRead(file);
+    const fmEnd = this.app.metadataCache.getFileCache(file)?.frontmatterPosition?.end?.offset;
+    if (fmEnd) body = body.slice(fmEnd);
+    const text = body.slice(0, 2000)
+      .replace(/```[\s\S]*?(```|$)/g, " ")
+      .replace(/%%[\s\S]*?(%%|$)/g, " ")
+      .replace(/!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)/g, " ")
+      .replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+\[.\]\s+|[-*+]\s+|\d+\.\s+)/gm, "")
+      .replace(/[*_~=`]+/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ").trim().slice(0, 280);
+    this._previews.set(file.path, { mtime: file.stat.mtime, text });
+    return text;
+  }
+
+  renderItem(listEl, file, ts, disp = {}) {
     const item = listEl.createDiv("ot-item");
     const text = item.createDiv("ot-item-text");
-    text.createDiv({ cls: "ot-item-title", text: file.extension === "md" ? file.basename : file.name });
-    text.createDiv({ cls: "ot-item-meta", text: typeof ts === "string" ? ts : relTime(ts) });
+    text.createDiv({ cls: "ot-item-title", text: file.basename });
+    if (disp.preview > 0 && file.extension === "md") {
+      const pv = text.createDiv("ot-item-preview");
+      pv.style.setProperty("--ot-lines", "2");
+      this.previewText(file).then((t) => { if (t) pv.setText(t); else pv.remove(); });
+    }
+    const meta = text.createDiv("ot-item-meta");
+    meta.createSpan({ text: typeof ts === "string" ? ts : relTime(ts) });
+    const cache = this.app.metadataCache.getFileCache(file);
+    for (const k of disp.props || []) {
+      let v = cache?.frontmatter?.[k];
+      if (v == null || v === "" || typeof v === "object" && !Array.isArray(v)) continue;
+      v = (Array.isArray(v) ? v : [v]).filter((x) => x != null && typeof x !== "object").map(cleanLink).join(", ");
+      if (!v) continue;
+      const c = meta.createSpan({ cls: "ot-item-prop", text: typeof v === "string" && v.length > 40 ? v.slice(0, 40) + "…" : String(v) });
+      c.setAttr("aria-label", k);
+    }
+    if (disp.tags) for (const t of [...new Set(getAllTags(cache || {}) || [])].slice(0, 5)) meta.createSpan({ cls: "ot-item-tag", text: t });
+    // file type at the bottom right, small like the date
+    if (file.extension !== "md") meta.createSpan({ cls: "ot-ext-badge", text: file.extension.toUpperCase() });
     const thumb = this.plugin.thumbnailFor(file);
     if (thumb) item.createEl("img", { cls: "ot-thumb", attr: { src: thumb, loading: "lazy" } });
     this.bindFile(item, file);
@@ -2971,7 +3202,8 @@ class TypefoldView extends ItemView {
     const src = p.thumbnailFor(file);
     if (src) cover.createEl("img", { attr: { src, loading: "lazy" } });
     else paintIcon(cover.createDiv("ot-card-placeholder"), p.iconFor(p.typeOfFile(file) || key), p.colorFor(p.typeOfFile(file) || key));
-    card.createDiv({ cls: "ot-card-title", text: file.extension === "md" ? file.basename : file.name });
+    card.createDiv({ cls: "ot-card-title", text: file.basename });
+    if (file.extension !== "md") card.createDiv("ot-card-ext").createSpan({ cls: "ot-ext-badge", text: file.extension.toUpperCase() });
     this.bindFile(card, file);
   }
 
@@ -3736,6 +3968,7 @@ class TypefoldSettingTab extends PluginSettingTab {
         .onChange(async (v) => { s.sortTypes = v; await p.saveSettings(); }));
     toggle("Show Inbox / Calendar / Tasks", "Inbox = notes without a type, Tasks = notes with open checkboxes.", "showSmart");
     toggle("Show Files section", "Images, PDFs, videos and audio.", "showFiles");
+    toggle("Show Favorites", "Your bookmarked files and folders (core Bookmarks plugin), as a Favorites row under Calendar.", "showFavorites");
     toggle("Show counts", "Show note counts next to each type.", "showCounts");
     new Setting(el).setName("Iconize icons")
       .setDesc("Use & sync: show Iconize's folder/file icons here and write icon changes made here back to Iconize. Ignore: use only this plugin's icons.")
