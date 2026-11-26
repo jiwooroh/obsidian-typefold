@@ -1537,6 +1537,9 @@ class TypefoldPlugin extends Plugin {
   async maybeShowWhatsNew() {
     const s = this.settings, v = this.manifest.version;
     if (s.lastSeenVersion === v) return;
+    // patch releases (1.1.0 → 1.1.1) update quietly; the window is for x.y releases
+    const minor = (x) => String(x).split(".").slice(0, 2).join(".");
+    if (s.lastSeenVersion && minor(s.lastSeenVersion) === minor(v)) { s.lastSeenVersion = v; await this.saveData(s); return; }
     const fresh = !s.lastSeenVersion && !Object.values(s.types || {}).some((c) => c.registered);
     s.lastSeenVersion = v;
     await this.saveData(s);
@@ -1978,11 +1981,11 @@ class TypefoldPlugin extends Plugin {
   /* ── creation ── */
   newObjectFlow() { new TypePickerModal(this, (key) => this.createObject(key)).open(); }
 
-  async createObject(key, extra = {}) {
+  async createObject(key, extra = {}, opts = {}) {
     let fk = this.parseFolderKey(key);
     if (fk) key = fk.type;
     const conf = this.settings.types[key] || {};
-    if (conf.newIn === "root") fk = null; // “Always the type's folder”
+    if (conf.newIn === "root" && !opts.here) fk = null; // “Always the type's folder” (unless you picked the folder yourself)
     const label = this.labelFor(key);
     const folder = normalizePath(fk?.path || this.typeFolders(key)[0] || this.settings.defaultFolder || "/");
     if (folder !== "/" && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
@@ -2017,6 +2020,36 @@ class TypefoldPlugin extends Plugin {
     }
     await this.app.workspace.getLeaf(false).openFile(file, { eState: { rename: "all" } });
     return file;
+  }
+
+  /* ── new note / folder from the sidebar's context menus ── */
+  /** a new note in this folder: an object of its type (with its properties) when the folder is in one, else a blank note */
+  async newNoteIn(folderPath) {
+    const path = normalizePath(folderPath || "/");
+    let typeKey = null, len = -1;
+    for (const [k, c] of Object.entries(this.settings.types)) {
+      if (k.includes(":") || !c.registered) continue;
+      for (const f of this.typeFolders(k)) if ((path === f || path.startsWith(f + "/")) && f.length > len) { typeKey = k; len = f.length; }
+    }
+    if (typeKey) {
+      const root = this.typeRoot(typeKey);
+      return this.createObject(path === root ? typeKey : this.folderKey(typeKey, path), {}, { here: true });
+    }
+    const folder = this.app.vault.getAbstractFileByPath(path);
+    const file = await this.app.fileManager.createNewMarkdownFile(folder instanceof TFolder ? folder : this.app.vault.getRoot(), "Untitled");
+    await this.app.workspace.getLeaf(false).openFile(file, { eState: { rename: "all" } });
+    return file;
+  }
+  /** a new folder inside this one, named "Untitled" (then rename it) */
+  async newFolderIn(folderPath) {
+    const parent = normalizePath(folderPath || "/");
+    const base = parent === "/" ? "Untitled" : `${parent}/Untitled`;
+    let path = base, i = 1;
+    while (this.app.vault.getAbstractFileByPath(path)) path = `${base} ${i++}`;
+    await this.app.vault.createFolder(path);
+    const tf = this.app.vault.getAbstractFileByPath(path);
+    if (tf) this.app.fileManager.promptForFileRename(tf);
+    return tf;
   }
 
   /* ── views ── */
@@ -3522,6 +3555,17 @@ class TypefoldView extends ItemView {
     }
 
     const scroll = pane.createDiv("ot-scroll");
+    // right-click on empty space: new note / folder at the top of the vault
+    scroll.oncontextmenu = (evt) => {
+      if (evt.target.closest(".ot-nav-row, .ot-section-title, .ot-fold-title")) return;
+      evt.preventDefault();
+      const m = new Menu();
+      m.addItem((i) => i.setTitle("New note").setIcon("square-pen").onClick(() => p.newNoteIn(p.settings.defaultFolder || "/")));
+      m.addItem((i) => i.setTitle("New folder").setIcon("folder-plus").onClick(() => p.newFolderIn("/")));
+      m.addSeparator();
+      m.addItem((i) => i.setTitle("New object type…").setIcon("shapes").onClick(() => new NewTypeModal(p).open()));
+      m.showAtMouseEvent(evt);
+    };
     const row = (parent, key, label, opts = {}) => {
       const r = parent.createDiv("ot-nav-row");
       if (key === this.selected) r.addClass("is-selected");
@@ -3944,6 +3988,9 @@ class TypefoldView extends ItemView {
       r.onclick = () => this.select(key);
       r.oncontextmenu = (evt) => {
         const m = new Menu();
+        m.addItem((i) => i.setTitle("New note").setIcon("square-pen").onClick(() => p.newNoteIn(path)));
+        m.addItem((i) => i.setTitle("New folder").setIcon("folder-plus").onClick(() => p.newFolderIn(path)));
+        m.addSeparator();
         m.addItem((i) => i.setTitle("Change icon & color…").setIcon("palette").onClick(() =>
           new TypeConfigModal(p, key, () => this.render()).open()));
         m.addItem((i) => i.setTitle("Archive folder").setIcon("archive").onClick(() => p.setArchived(path, true)));
@@ -4017,7 +4064,9 @@ class TypefoldView extends ItemView {
     const p = this.plugin;
     const isType = !key.includes(":");
     const menu = new Menu();
-    if (isType) menu.addItem((i) => i.setTitle(`New ${p.labelFor(key)}`).setIcon("plus").onClick(() => p.createObject(key)));
+    if (isType) menu.addItem((i) => i.setTitle(`New ${p.labelFor(key)}`).setIcon("square-pen").onClick(() => p.createObject(key)));
+    if (isType && p.typeRoot(key)) menu.addItem((i) => i.setTitle("New folder").setIcon("folder-plus").onClick(() => p.newFolderIn(p.typeRoot(key))));
+    if (isType) menu.addSeparator();
     if (isType) {
       menu.addItem((i) => i.setTitle("Move up").setIcon("arrow-up").onClick(() => this.moveType(key, -1)));
       menu.addItem((i) => i.setTitle("Move down").setIcon("arrow-down").onClick(() => this.moveType(key, 1)));
