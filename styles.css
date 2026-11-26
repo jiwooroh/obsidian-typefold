@@ -812,3 +812,401 @@ body.is-phone .ot-swatch { width: 28px; height: 28px; flex: 0 0 28px; }
 .ot-qo-key { font-size: 11.5px; color: var(--text-faint); background: var(--background-secondary); border-radius: 5px; padding: 1px 6px; }
 body.is-phone .modal.ot-qo { width: 100vw; height: 92vh; border-radius: 14px 14px 0 0; }
 body.is-phone .ot-qo-foot { display: none; }
+
+/* ───────── Tasks view ───────── */
+.ot-tasks-root.ot-tasks-root { padding: 0; position: relative; background: var(--background-primary); }
+.ot-tasks-root.has-bg {
+  background-color: var(--ot-tasks-bg-color, var(--background-primary));
+  background-image: var(--ot-tasks-bg-image, none);
+  background-size: cover; background-position: center; background-attachment: local;
+}
+.ot-tasks-root.has-bg:not([style*="--ot-tasks-bg-image"]) {
+  background-color: color-mix(in srgb, var(--ot-tasks-bg-color) 14%, var(--background-primary));
+}
+.ot-tasks-wrap { max-width: 1100px; margin: 0 auto; padding: 28px 28px 40px; display: flex; flex-direction: column; gap: 14px; min-height: 100%; box-sizing: border-box; }
+.ot-tasks-head { display: flex; align-items: center; gap: 10px; }
+.ot-tasks-title { display: flex; align-items: center; gap: 8px; cursor: pointer; border-radius: 8px; padding: 4px 6px 4px 4px; margin-left: -4px; }
+.ot-tasks-title:hover { background: var(--background-modifier-hover); }
+.ot-tasks-title .ot-icon { width: 30px; height: 30px; }
+.ot-tasks-name { font-size: 26px; font-weight: 700; letter-spacing: -.01em; }
+.ot-tasks-caret { color: var(--text-faint); display: flex; }
+.ot-tasks-caret svg { width: 16px; height: 16px; }
+.ot-tasks-count { color: var(--text-muted); font-size: 13px; }
+.ot-tasks-new { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+  background: var(--interactive-accent); color: var(--text-on-accent); font-size: 13px; font-weight: 600; }
+.ot-tasks-new svg { width: 15px; height: 15px; }
+.ot-tasks-new:hover { filter: brightness(1.06); }
+.ot-tasks-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ot-tasks-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--background-modifier-hover); }
+.ot-tasks-seg-btn { padding: 4px 12px; border-radius: 6px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
+.ot-tasks-seg-btn.is-active { background: var(--background-primary); color: var(--text-normal); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.ot-tasks-nav { display: flex; align-items: center; gap: 2px; }
+.ot-tasks-today { font-size: 13px; padding: 3px 10px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); margin: 0 2px; }
+.ot-tasks-today:hover { background: var(--background-modifier-hover); }
+.ot-tasks-period { font-weight: 600; font-size: 15px; margin-left: 8px; }
+.ot-tasks-body { flex: 1; }
+.ot-tasks-empty { color: var(--text-muted); padding: 30px 4px; text-align: center; }
+
+/* readable panels over a background */
+.ot-tasks-root.has-bg .ot-tasks-head,
+.ot-tasks-root.has-bg .ot-tasks-bar,
+.ot-tasks-root.has-bg .ot-tasks-group,
+.ot-tasks-root.has-bg .ot-month,
+.ot-tasks-root.has-bg .ot-week-col,
+.ot-tasks-root.has-bg .ot-tasks-empty {
+  background: color-mix(in srgb, var(--background-primary) 84%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border-radius: 12px;
+}
+.ot-tasks-root.has-bg .ot-tasks-head { padding: 8px 12px; }
+.ot-tasks-root.has-bg .ot-tasks-bar { padding: 6px 10px; align-self: flex-start; }
+.ot-tasks-root.has-bg .ot-tasks-group { padding: 6px 8px; }
+
+/* groups + rows */
+.ot-tasks-group + .ot-tasks-group { margin-top: 12px; }
+.ot-tasks-group-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-muted); padding: 4px 2px; cursor: pointer; }
+.ot-tasks-group-head.is-warn { color: var(--text-error); }
+.ot-tasks-chev { display: flex; } .ot-tasks-chev svg { width: 14px; height: 14px; }
+.ot-tasks-group-n { font-weight: 500; color: var(--text-faint); }
+.ot-tasks-none { color: var(--text-faint); font-size: 13px; padding: 6px 30px; }
+.ot-task-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; position: relative; }
+.ot-task-row:hover { background: var(--background-modifier-hover); }
+.ot-task-check { flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--ot-status, var(--text-faint));
+  display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background .12s; }
+.ot-task-check:hover { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 12%, transparent); }
+.ot-task-check.is-done { background: var(--interactive-accent); border-color: var(--interactive-accent); color: var(--text-on-accent); }
+.ot-task-check svg { width: 12px; height: 12px; stroke-width: 3; }
+.ot-task-check.is-busy { opacity: .5; }
+.ot-task-main { min-width: 0; flex: 1; }
+.ot-task-title { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.is-done > .ot-task-main .ot-task-title, .ot-task-pill.is-done .ot-task-pill-text { text-decoration: line-through; color: var(--text-faint); }
+.ot-task-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; font-size: 12px; color: var(--text-muted); }
+.ot-task-date, .ot-task-note { display: inline-flex; align-items: center; gap: 3px; }
+.ot-task-date.is-overdue { color: var(--text-error); }
+.ot-task-note { cursor: pointer; max-width: 220px; }
+.ot-task-note span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-task-note:hover { color: var(--text-normal); text-decoration: underline; }
+.ot-task-mi { display: flex; } .ot-task-mi svg { width: 12px; height: 12px; }
+.ot-task-tag { color: var(--tag-color, var(--text-accent)); }
+.ot-task-row.is-compact { padding: 5px 4px; gap: 6px; }
+.ot-task-row.is-compact .ot-task-title { font-size: 13px; }
+.ot-task-row.is-compact .ot-task-check { width: 15px; height: 15px; }
+
+/* month */
+.ot-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--background-modifier-border); border-radius: 12px; overflow: hidden; }
+.ot-month-dow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); padding: 6px 8px; border-bottom: 1px solid var(--background-modifier-border); }
+.ot-month-cell { min-height: 104px; padding: 4px; border-right: 1px solid var(--background-modifier-border); border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ot-month-cell:nth-child(7n) { border-right: none; }
+.ot-month-cell:hover { background: var(--background-modifier-hover); }
+.ot-month-cell.is-other .ot-month-num { color: var(--text-faint); }
+.ot-month-num { font-size: 12px; font-weight: 600; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-muted); }
+.ot-month-cell.is-today .ot-month-num { background: var(--interactive-accent); color: var(--text-on-accent); }
+.ot-month-pills { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ot-task-pill { display: flex; align-items: center; gap: 4px; font-size: 11.5px; line-height: 1.35; padding: 1px 4px; border-radius: 4px; min-width: 0;
+  background: color-mix(in srgb, var(--ot-prio, var(--interactive-accent)) 13%, transparent); }
+.ot-task-pill:hover { background: color-mix(in srgb, var(--ot-prio, var(--interactive-accent)) 22%, transparent); }
+.ot-task-pill .ot-task-check { width: 11px; height: 11px; margin: 0; border-width: 1.3px; }
+.ot-task-pill .ot-task-check svg { width: 8px; height: 8px; }
+.ot-task-pill-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ot-month-more { font-size: 11px; color: var(--text-muted); padding-left: 4px; }
+.ot-month-dots { display: none; }
+
+/* week */
+.ot-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.ot-week-col { border: 1px solid var(--background-modifier-border); border-radius: 10px; min-height: 180px; padding: 6px; min-width: 0; }
+.ot-week-col.is-today { border-color: var(--interactive-accent); }
+.ot-week-head { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px 6px; cursor: pointer; }
+.ot-week-dow { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); font-weight: 600; }
+.ot-week-num { font-size: 18px; font-weight: 700; }
+.ot-week-col.is-today .ot-week-num { color: var(--interactive-accent); }
+
+/* phones + narrow panes */
+body.is-phone .ot-tasks-wrap { padding: 14px 12px 32px; gap: 10px; }
+body.is-phone .ot-tasks-name { font-size: 22px; }
+body.is-phone .ot-tasks-new span:last-child { display: none; }
+body.is-phone .ot-tasks-new { padding: 6px 8px; }
+body.is-phone .ot-tasks-seg { width: 100%; }
+body.is-phone .ot-tasks-seg-btn { flex: 1; text-align: center; padding: 5px 0; }
+body.is-phone .ot-tasks-period { margin-left: auto; }
+body.is-phone .ot-tasks-nav { width: 100%; }
+body.is-phone .ot-month-cell { min-height: 54px; align-items: center; }
+body.is-phone .ot-month-pills { display: none; }
+body.is-phone .ot-month-dots { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
+.ot-month-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--interactive-accent); }
+.ot-month-dot.is-done { background: var(--text-faint); }
+body.is-phone .ot-week { grid-template-columns: 1fr; gap: 6px; }
+body.is-phone .ot-week-col { min-height: 0; }
+body.is-phone .ot-week-head { align-items: center; }
+body.is-phone .ot-month-dow { padding: 6px 0; text-align: center; }
+
+/* Tasks in the sidebar list pane */
+.ot-task-pane { padding: 4px 8px 16px; }
+.ot-task-pane .ot-tasks-group + .ot-tasks-group { margin-top: 8px; }
+.ot-task-pane .ot-tasks-group-head { font-size: 12px; padding: 4px 2px; }
+.ot-task-pane .ot-task-row { padding: 6px 6px; gap: 8px; }
+.ot-task-pane .ot-task-title { font-size: 13px; }
+.ot-task-pane .ot-task-check { width: 16px; height: 16px; }
+.ot-task-pane .ot-task-meta { font-size: 11.5px; gap: 2px 8px; }
+.ot-task-pane .ot-task-note { max-width: 150px; }
+.ot-list-header .ot-head-btn.is-active { color: var(--interactive-accent); }
+.ot-task-tools .ot-head-btn.is-active { color: var(--interactive-accent); }
+.ot-list-pane .ot-list-header .ot-list-title { flex-shrink: 0; }
+
+/* sidebar Tasks views */
+.ot-task-tools { display: flex; align-items: center; gap: 4px; padding: 0 8px 6px 10px; border-bottom: 1px solid var(--background-modifier-border); }
+.ot-task-tabs { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ot-task-tabs::-webkit-scrollbar { display: none; }
+.ot-task-tab { display: flex; align-items: center; gap: 4px; flex: none; padding: 3px 7px; border-radius: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.ot-task-tab:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-task-tab.is-active { background: var(--background-modifier-active-hover, var(--background-modifier-hover)); color: var(--text-normal); font-weight: 600; }
+.ot-task-tab-icon { display: flex; } .ot-task-tab-icon svg { width: 13px; height: 13px; }
+.ot-task-tab-add { flex: none; padding: 3px; } .ot-task-tab-add svg { width: 14px; height: 14px; }
+.ot-task-acts { display: flex; flex: none; }
+.ot-task-acts .ot-head-btn { padding: 4px; } .ot-task-acts .ot-head-btn svg { width: 15px; height: 15px; }
+
+.ot-pane-day-head { display: flex; align-items: center; gap: 10px; padding: 10px 4px 8px; }
+.ot-pane-day-big { font-size: 30px; font-weight: 700; line-height: 1; color: var(--interactive-accent); min-width: 34px; text-align: center; }
+.ot-pane-day-dow { font-weight: 600; font-size: 14px; }
+.ot-pane-day-month { font-size: 12px; color: var(--text-muted); }
+
+.ot-pane-nav { display: flex; align-items: center; gap: 2px; padding: 8px 0 4px; }
+.ot-pane-nav .clickable-icon { padding: 3px; } .ot-pane-nav .clickable-icon svg { width: 15px; height: 15px; }
+.ot-pane-nav-label { font-weight: 600; font-size: 13px; padding: 0 4px; }
+.ot-pane-today-btn { margin-left: auto; font-size: 11.5px; padding: 1px 8px; border-radius: 5px; border: 1px solid var(--background-modifier-border); cursor: pointer; color: var(--text-muted); }
+.ot-pane-today-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+.ot-pane-wday { padding: 6px 2px 4px; border-top: 1px solid var(--background-modifier-border); }
+.ot-pane-wday:first-of-type { border-top: none; }
+.ot-pane-wday-head { display: flex; align-items: baseline; gap: 7px; padding: 0 4px 2px; font-size: 12.5px; }
+.ot-pane-wday-num { font-size: 16px; font-weight: 700; min-width: 20px; }
+.ot-pane-wday-dow { color: var(--text-muted); font-weight: 600; }
+.ot-pane-wday.is-today .ot-pane-wday-num, .ot-pane-wday.is-today .ot-pane-wday-dow { color: var(--interactive-accent); }
+.ot-pane-wday.is-empty .ot-pane-wday-head { opacity: .55; }
+
+.ot-mini-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; padding: 2px 0 10px; margin-bottom: 4px; border-bottom: 1px solid var(--background-modifier-border); }
+.ot-mini-dow { text-align: center; font-size: 10.5px; font-weight: 600; color: var(--text-faint); padding-bottom: 3px; }
+.ot-mini-day { display: flex; flex-direction: column; align-items: center; padding: 2px 0 3px; border-radius: 7px; cursor: pointer; min-height: 32px; }
+.ot-mini-day:hover { background: var(--background-modifier-hover); }
+.ot-mini-num { font-size: 12px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 50%; }
+.ot-mini-day.is-other .ot-mini-num { color: var(--text-faint); }
+.ot-mini-day.is-today .ot-mini-num { color: var(--interactive-accent); font-weight: 700; }
+.ot-mini-day.is-selected .ot-mini-num { background: var(--interactive-accent); color: var(--text-on-accent); font-weight: 700; }
+.ot-mini-dots { display: flex; gap: 2px; height: 4px; margin-top: 1px; }
+.ot-mini-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--interactive-accent); }
+.ot-mini-dot.is-late { background: var(--text-error); }
+.ot-mini-dot.is-done { background: var(--text-faint); }
+
+.ot-taskview-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 2px; padding: 0 0 12px; }
+.ot-taskview-icon { justify-content: center; }
+.ot-taskview-icon.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }
+.ot-task-add { display: flex; align-items: center; gap: 6px; margin: 8px 10px 2px; padding: 0 8px; border-radius: 8px; background: var(--background-modifier-form-field, var(--background-modifier-hover)); border: 1px solid var(--background-modifier-border); }
+.ot-task-add:focus-within { border-color: var(--interactive-accent); }
+.ot-task-add-icon { display: flex; color: var(--text-faint); } .ot-task-add-icon svg { width: 14px; height: 14px; }
+.ot-task-add input { flex: 1; min-width: 0; border: none !important; background: transparent !important; box-shadow: none !important; padding: 6px 0; font-size: 13px; height: auto; text-overflow: ellipsis; }
+.ot-task-add.is-inline { margin: 4px 0 2px 2px; }
+.ot-tasks-none.is-hidden { display: none; }
+.ot-tasks-group-add { margin-left: auto; padding: 2px; opacity: 0; transition: opacity .12s; }
+.ot-tasks-group-add svg { width: 13px; height: 13px; }
+.ot-tasks-group:hover .ot-tasks-group-add, .ot-pane-wday:hover .ot-tasks-group-add, body.is-mobile .ot-tasks-group-add { opacity: 1; }
+.ot-pane-wday-head .ot-tasks-group-add { align-self: center; }
+.ot-task-prio { display: inline-flex; color: var(--ot-prio); }
+.ot-task-prio svg { width: 12px; height: 12px; fill: currentColor; }
+/* lines only between date sections, not between tasks */
+.ot-tasks-group + .ot-tasks-group { border-top: 1px solid var(--background-modifier-border); padding-top: 8px; }
+.ot-task-pane .ot-tasks-group + .ot-tasks-group { padding-top: 6px; }
+.ot-tasks-root.has-bg .ot-tasks-group + .ot-tasks-group { border-top: none; }
+.ot-pane-nav + .ot-pane-wday { border-top: none; }
+
+/* banners always fill their box: themes/snippets (object-fit: contain) and image-resize wrappers must not shrink them */
+.ot-banner.ot-banner > .image-resize-container,
+.ot-banner.ot-banner > div:has(> img) { display: block !important; width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; margin: 0 !important; }
+.ot-banner.ot-banner img { width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; object-fit: cover !important; object-position: center; display: block; margin: 0 !important; }
+.ot-banner { width: 100%; }
+/* image banners use the same height as the generated type/folder banners */
+.ot-banner { aspect-ratio: auto; height: 150px; max-height: none; }
+body.is-phone .ot-banner { height: 110px; }
+.ot-banner-option-gen { display: flex; align-items: center; justify-content: center; color: var(--ot-color);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--ot-color) 22%, var(--background-secondary)), var(--background-secondary)); }
+.ot-banner-option-gen svg { width: 18px; height: 18px; }
+/* banner Fit / Reposition */
+.ot-banner { position: relative; }
+.ot-banner.is-fit { background: var(--background-secondary); }
+.ot-banner.is-fit.ot-banner img { object-fit: contain !important; }
+.ot-banner.is-repositioning { cursor: grab; touch-action: none; outline: 2px solid var(--interactive-accent); outline-offset: -2px; }
+.ot-banner.is-repositioning:active { cursor: grabbing; }
+.ot-banner.is-repositioning img { pointer-events: none; user-select: none; -webkit-user-drag: none; }
+.ot-banner-reposition { position: absolute; right: 10px; bottom: 10px; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0,0,0,.18); cursor: default; }
+.ot-banner-reposition-hint { font-size: 12px; color: var(--text-muted); margin-right: 4px; }
+.ot-banner-reposition button { font-size: 12px; padding: 3px 10px; height: auto; }
+
+/* on/off switches */
+body.ot-no-chips .ot-note-chipsrow { display: none !important; }
+body.ot-no-page-icons .ot-page-icon { display: none !important; }
+body.ot-no-status .ot-status { display: none !important; }
+body.ot-no-ribbon .side-dock-ribbon-action.ot-ribbon { display: none !important; }
+body.ot-no-navfoot .ot-nav-foot { display: none !important; }
+body.ot-no-navtop .ot-nav-top { display: none !important; }
+body.ot-home-no-greeting .ot-home-hello, body.ot-home-no-greeting .ot-home-date { display: none !important; }
+body.ot-home-no-types .ot-home-sec-types,
+body.ot-home-no-pinned .ot-home-sec-pinned,
+body.ot-home-no-recent .ot-home-sec-recent { display: none !important; }
+
+/* settings tabs */
+.ot-settings-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--background-modifier-border); position: sticky; top: 0; z-index: 2; background: var(--background-primary); }
+.ot-settings-tab { display: flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 7px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
+.ot-settings-tab:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-settings-tab.is-active { background: var(--interactive-accent); color: var(--text-on-accent); font-weight: 600; }
+.ot-settings-tab-icon { display: flex; } .ot-settings-tab-icon svg { width: 14px; height: 14px; }
+.ot-settings-guide { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 8px 0 4px; border-radius: 10px;
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary)); }
+.ot-settings-guide-text { flex: 1; font-size: 13px; color: var(--text-muted); }
+body.is-phone .ot-settings-guide { flex-direction: column; align-items: stretch; }
+
+/* what's new */
+.ot-whatsnew { width: min(620px, 94vw); }
+.ot-whatsnew-title { display: flex; align-items: center; gap: 10px; }
+.ot-whatsnew-title .ot-icon { width: 28px; height: 28px; }
+.ot-whatsnew-tabs { margin: 0 0 10px; }
+.ot-whatsnew-body { max-height: min(60vh, 520px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 8px; }
+.ot-whatsnew-item { display: flex; gap: 12px; align-items: flex-start; }
+.ot-whatsnew-item .ot-icon { flex: none; width: 30px; height: 30px; }
+.ot-whatsnew-item-title { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.ot-whatsnew-item-text { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+.ot-whatsnew-foot { margin-top: 12px; align-items: center; }
+
+/* Calendar + Tasks: daily note links */
+.ot-daily-chip { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 11.5px; padding: 2px 8px; border-radius: 6px; cursor: pointer;
+  color: var(--text-faint); border: 1px dashed var(--background-modifier-border); }
+.ot-daily-chip.has-note { color: var(--text-muted); border-style: solid; background: var(--background-modifier-hover); }
+.ot-daily-chip:hover { color: var(--text-normal); border-color: var(--interactive-accent); }
+.ot-pane-day-head .ot-spacer { flex: 1; }
+.ot-pane-sel-note { display: flex; padding: 2px 2px 6px; }
+.ot-pane-wday-note { padding: 2px; margin-left: auto; color: var(--text-faint); opacity: 0; }
+.ot-pane-wday-note.has-note { opacity: .9; color: var(--text-muted); }
+.ot-pane-wday:hover .ot-pane-wday-note, body.is-mobile .ot-pane-wday-note { opacity: 1; }
+.ot-pane-wday-note svg { width: 13px; height: 13px; }
+.ot-pane-wday-head .ot-pane-wday-note + .ot-tasks-group-add { margin-left: 0; }
+.ot-mini-day.has-note .ot-mini-num { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent); }
+
+/* Favorites / Recents: small foldable sections */
+.ot-fold-title { cursor: pointer; user-select: none; border-radius: 5px; }
+.ot-fold-title:hover { color: var(--text-muted); }
+.ot-fold-chev { display: flex; margin-left: 2px; opacity: 0; transition: opacity .12s, transform .12s; }
+.ot-fold-chev svg { width: 12px; height: 12px; }
+.ot-fold-chev.is-open { transform: rotate(90deg); }
+.ot-fold-title:hover .ot-fold-chev, .ot-fold-chev:not(.is-open), body.is-mobile .ot-fold-chev { opacity: 1; }
+.ot-fold-section .ot-fav-row { min-height: 26px; }
+
+/* section header buttons: themes give .clickable-icon large padding, which squeezed the icon to 0px */
+.ot-section-title .ot-section-add.clickable-icon { padding: 0 !important; flex: none; overflow: visible; }
+.ot-section-title .ot-section-add svg { flex: none; width: 14px !important; height: 14px !important; }
+body.is-mobile .ot-section-title .ot-section-add svg { width: 17px !important; height: 17px !important; }
+
+/* section headers (Object Types, Files, Favorites, Recents): Notion-like hover — the whole row lights up and its buttons show clearly */
+.ot-nav-pane .ot-section > .ot-section-title { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 4px 2px 8px; margin: 0 4px 2px; border-radius: 7px; transition: background-color .1s, color .1s; }
+.ot-nav-pane .ot-section > .ot-section-title:hover { background: var(--background-modifier-hover); color: var(--text-muted); }
+.ot-nav-pane .ot-section-title .ot-section-add { color: var(--text-muted); opacity: 0; border-radius: 5px; width: 22px !important; height: 22px !important; }
+.ot-nav-pane .ot-section-title:hover .ot-section-add { opacity: 1; }
+.ot-nav-pane .ot-section-title .ot-section-add:hover { color: var(--text-normal); background: var(--background-modifier-active-hover, var(--background-modifier-hover)); }
+.ot-nav-pane .ot-section-title .ot-section-add svg { width: 15px !important; height: 15px !important; stroke-width: 2.1; }
+body.is-mobile .ot-nav-pane .ot-section-title .ot-section-add { opacity: 1; width: 30px !important; height: 30px !important; }
+.ot-nav-pane .ot-fold-title .ot-fold-chev { opacity: .7; }
+.ot-whatsnew-calm { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--text-muted); line-height: 1.45;
+  padding: 8px 10px; margin: 0 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-secondary)); }
+.ot-whatsnew-calm-icon { display: flex; color: var(--interactive-accent); padding-top: 1px; } .ot-whatsnew-calm-icon svg { width: 15px; height: 15px; }
+.ot-newtype-fn { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.ot-newtype-fn-label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.ot-newtype-fn-seg { align-self: flex-start; }
+.ot-newtype-fn-off { font-size: 12.5px; color: var(--text-faint); }
+
+/* Start here */
+.ot-start-hero { padding: 4px 2px 6px; }
+.ot-start-title { font-size: 18px; font-weight: 700; }
+.ot-start-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+.ot-start-step { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); margin: 8px 2px 0; }
+.ot-start-folders { display: flex; flex-direction: column; gap: 2px; }
+.ot-start-folder { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.ot-start-folder:hover { background: var(--background-modifier-hover); }
+.ot-start-folder .ot-icon { width: 24px; height: 24px; flex: none; }
+.ot-start-folder-name { flex: 1; font-size: 13.5px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-start-folder-n { font-size: 12px; color: var(--text-faint); }
+.ot-start-folder.is-done { opacity: .6; cursor: default; }
+.ot-start-none { font-size: 13px; color: var(--text-faint); padding: 4px 2px; }
+.ot-start-opts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.ot-start-opt { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--background-modifier-border); cursor: pointer; }
+.ot-start-opt:hover { background: var(--background-modifier-hover); }
+.ot-start-opt-text { flex: 1; min-width: 0; }
+.ot-start-opt-title { font-size: 13px; font-weight: 600; }
+.ot-start-opt-desc { font-size: 11.5px; color: var(--text-faint); line-height: 1.35; }
+.ot-start-opt .checkbox-container { flex: none; pointer-events: none; }
+.ot-start-apply { display: flex; justify-content: flex-end; padding: 6px 0 2px; position: sticky; bottom: 0; background: linear-gradient(transparent, var(--background-primary) 35%); }
+body.is-phone .ot-start-opts { grid-template-columns: 1fr; }
+.ot-settings-guide button + button { margin-left: 0; }
+
+/* one dialog for new + edit type */
+.ot-type-modal { width: min(620px, 94vw); }
+.ot-tm-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.ot-tm-head .ot-tm-icon { width: 40px; height: 40px; flex: none; }
+.ot-tm-head .ot-tm-icon svg { width: 22px; height: 22px; }
+.ot-tm-name.ot-tm-name { flex: 1; font-size: 18px; font-weight: 600; height: 40px; margin: 0; }
+.ot-tm-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--background-modifier-border); margin: 0 -2px 2px; }
+.ot-tm-tab { display: flex; align-items: center; gap: 6px; padding: 7px 12px 8px; font-size: 13px; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ot-tm-tab:hover { color: var(--text-normal); }
+.ot-tm-tab.is-active { color: var(--text-normal); font-weight: 600; border-bottom-color: var(--interactive-accent); }
+.ot-tm-tab-icon { display: flex; } .ot-tm-tab-icon svg { width: 14px; height: 14px; }
+.ot-tm-body { height: min(440px, 58vh); overflow-y: auto; padding: 4px 2px 8px; }
+.ot-tm-body.is-folder { height: auto; max-height: 60vh; }
+.ot-tm-section { margin-top: 12px; }
+.ot-tm-section .ot-config-label { margin-top: 0; }
+.ot-tm-desc { font-size: 12.5px; color: var(--text-muted); margin: 2px 0 8px; line-height: 1.45; }
+.ot-tm-folders { display: flex; flex-direction: column; gap: 6px; }
+.ot-tm-folder-row { display: flex; align-items: center; gap: 8px; }
+.ot-tm-folder-row input { flex: 1; margin: 0; }
+.ot-tm-folder-info { font-size: 12px; color: var(--text-faint); white-space: nowrap; min-width: 64px; text-align: right; }
+.ot-tm-add { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; padding: 4px 6px; border-radius: 6px; margin-top: 2px; }
+.ot-tm-add:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-tm-add svg { width: 13px; height: 13px; }
+.ot-tm-levels { display: flex; flex-direction: column; gap: 6px; }
+.ot-tm-level { display: grid; grid-template-columns: 62px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center; }
+.ot-tm-level-n { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.ot-tm-level-ex { font-size: 12px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-tm-level input, .ot-tm-prop input { margin: 0; width: 100%; }
+.ot-tm-props { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.ot-tm-prop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; align-items: center; width: 100%; }
+.ot-tm-section .setting-item { padding: 6px 0; border-top: none; }
+.ot-tm-foot { margin-top: 10px; }
+body.is-phone .ot-tm-level { grid-template-columns: 54px minmax(0, 1fr); }
+body.is-phone .ot-tm-level-ex { display: none; }
+.ot-tm-common { display: flex; flex-direction: column; gap: 1px; max-height: 210px; overflow-y: auto; }
+.ot-tm-common-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.ot-tm-common-row:hover { background: var(--background-modifier-hover); }
+.ot-tm-common-name { font-size: 13px; font-weight: 500; }
+.ot-tm-common-n { margin-left: auto; font-size: 12px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.ot-tm-common-row { position: relative; isolation: isolate; }
+.ot-tm-common-row::before { content: ""; position: absolute; left: 0; top: 2px; bottom: 2px; width: var(--ot-share, 0%); border-radius: 6px; z-index: -1;
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent); }
+.ot-tm-common-row.is-auto { cursor: default; }
+.ot-tm-common-row.is-auto .ot-tm-common-name { color: var(--text-muted); }
+.ot-tm-common-badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 4px; color: var(--text-muted); background: var(--background-modifier-hover); }
+.ot-tm-prop { grid-template-columns: minmax(0, 1fr) 118px minmax(0, 1.3fr) auto; }
+.ot-tm-prop-type { height: 30px; font-size: 12.5px; padding: 0 22px 0 8px; margin: 0; }
+.ot-tm-prop-val { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ot-tm-prop-val input[type="text"], .ot-tm-prop-val input[type="number"] { flex: 1; min-width: 0; }
+.ot-tm-prop-val .ot-tm-desc { margin: 0; }
+body.is-phone .ot-tm-prop { grid-template-columns: minmax(0, 1fr) 96px auto; }
+body.is-phone .ot-tm-prop-val { grid-column: 1 / 3; }
+
+/* hint on a type page + hiding Iconize's title icon there */
+body.ot-hide-iz-typepages .ot-type-page .iconize-title-icon { display: none !important; }
+.ot-hint { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px; margin: 8px 0 4px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary)); border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, transparent); }
+.ot-hint-icon { display: flex; color: var(--interactive-accent); padding-top: 2px; } .ot-hint-icon svg { width: 15px; height: 15px; }
+.ot-hint-text { flex: 1; min-width: 200px; line-height: 1.45; color: var(--text-normal); }
+.ot-hint-sub { color: var(--text-muted); }
+.ot-hint-acts { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; padding-left: 25px; }
+.ot-hint-acts button { font-size: 12px; height: 26px; padding: 0 10px; }
+.ot-cal-tip { margin: 6px 10px 2px; flex-wrap: nowrap; align-items: center; font-size: 12px; padding: 8px 10px; }
+.ot-cal-tip .ot-hint-text { min-width: 0; }
+.ot-cal-tip button { flex: none; font-size: 12px; height: 24px; padding: 0 10px; }
+.ot-start-apply { position: static; background: none; padding: 10px 0 4px; }

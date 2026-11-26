@@ -45,6 +45,7 @@ function searchIcons(q, limit = 240) {
 
 const VIEW_TYPE = "typefold-view";
 const HOME_VIEW = "typefold-home";
+const TASKS_VIEW = "typefold-tasks";
 const LEGACY_VIEWS = { "object-types-view": VIEW_TYPE, "object-types-home": HOME_VIEW };
 
 /* Apple system colors (light) */
@@ -105,6 +106,14 @@ const SMART = [
 ];
 
 
+/** the sidebar Tasks panel's starting views (users can rename, re-icon, re-filter, add and delete them) */
+const DEFAULT_TASK_VIEWS = [
+  { id: "today", name: "Today", icon: "sun", layout: "today", filter: { scope: "all", tags: [], status: "open", date: "any" } },
+  { id: "week", name: "Week", icon: "calendar-range", layout: "week", filter: { scope: "all", tags: [], status: "open", date: "any" } },
+  { id: "month", name: "Month", icon: "calendar", layout: "month", filter: { scope: "all", tags: [], status: "open", date: "any" } },
+  { id: "all", name: "All", icon: "list-checks", layout: "list", filter: { scope: "all", tags: [], status: "open", date: "any" } },
+];
+
 /* first-run mapping of this vault's existing types to folders */
 const FOLDER_TYPE_SEED = {}; // first-run mapping of existing `type` values to folders (empty in the public release)
 
@@ -144,7 +153,25 @@ const DEFAULT_SETTINGS = {
   viewTabs: true,
   iconize: "sync", // "sync" = show Iconize icons and write icon changes back; "ignore"
   replaceExplorer: false,
-  smartItems: ["smart:home", "smart:inbox", "smart:calendar"],
+  smartItems: ["smart:home", "smart:inbox", "smart:calendar", "smart:tasks"],
+  showRecents: true, recentsCount: 7, closedSections: {}, // sidebar sections: Favorites / Recents folded?
+  recentFiles: [], // most recently opened first (Recents)
+  taskViews: {}, // scope ("all" or a type key) -> { mode: "month"|"week"|"day"|"list", bg: { image }|{ color }|null }
+  taskShowDone: false,
+  taskPanelViews: null, // sidebar Tasks views; null = DEFAULT_TASK_VIEWS
+  taskPanelView: "today",
+  // on/off switches (true = shown)
+  showNoteChips: true, showPageIcons: true, showStatusBar: true, showRibbon: true, showNavFooter: true,
+  showNavTop: true, homeGreeting: true, homeTypes: true, homePinned: true, homeRecent: true,
+  showWhatsNew: true, lastSeenVersion: "",
+  useFolderNotes: true, // off: Typefold ignores folder notes entirely (no opening, headers or creating)
+  oneFolderOpen: false,
+  hideIconizeOnTypePages: false, // hide Iconize's big title icon on type pages
+  iconizeHintDismissed: false, // opening a folder closes the others (except the folders it sits in)
+  splitCalendarTasks: false, // false = one Calendar row with a Daily notes tab and the task tabs
+  taskSource: "", // "tasknotes" | "tasks" (Tasks plugin) | "checkbox" (`- [ ]` in notes); "" = pick on first load
+  homeMode: "typefold", // "typefold" = built-in Home dashboard, "note" = the note in homeNote
+  homeNote: "",
   openHomeOnStartup: true,
   newTabSearch: true,
   userName: "",
@@ -212,12 +239,36 @@ class TypefoldPlugin extends Plugin {
     this.propsVisible = !this.settings.hideProperties;
 
     ICONIZE_API = () => this.app.plugins?.plugins?.["obsidian-icon-folder"]?.api || null;
+    // a load that failed half-way never unloads, so clear what it registered or this load throws "already registered"
+    for (const t of [VIEW_TYPE, HOME_VIEW, TASKS_VIEW]) { try { if (this.app.viewRegistry?.viewByType?.[t]) this.app.viewRegistry.unregisterView(t); } catch (e) {} }
+    try { require("obsidian").MarkdownPreviewRenderer?.unregisterCodeBlockPostProcessor?.("typefold-home"); } catch (e) {}
     this.registerView(VIEW_TYPE, (leaf) => new TypefoldView(leaf, this));
     this.registerView(HOME_VIEW, (leaf) => new HomeView(leaf, this));
+    this.registerView(TASKS_VIEW, (leaf) => new TasksView(leaf, this));
+    // the Tasks row was hidden by default before; show it once for existing vaults
+    if (Array.isArray(this.settings.smartItems)) this.settings.smartItems = this.settings.smartItems.filter((k) => k !== "smart:recent");
+    if (!this.settings.taskSource) {
+      const has = (id) => !!this.app.plugins?.enabledPlugins?.has?.(id);
+      this.settings.taskSource = this.settings.useTaskNotes === false ? "checkbox"
+        : has("tasknotes") ? "tasknotes" : has("obsidian-tasks-plugin") ? "tasks" : "checkbox";
+    }
+    if (!this.settings.recentRowShown) {
+      this.settings.recentRowShown = true;
+      const items = this.settings.smartItems;
+      if (Array.isArray(items)) this.settings.smartItems = items.filter((k) => k !== "smart:recent"); // Recents is a section now
+      if (!(this.settings.recentFiles || []).length) this.settings.recentFiles = (this.app.workspace.getLastOpenFiles?.() || []).slice(0, 60);
+    }
+    if (!this.settings.tasksRowShown) {
+      this.settings.tasksRowShown = true;
+      if (Array.isArray(this.settings.smartItems) && !this.settings.smartItems.includes("smart:tasks")) this.settings.smartItems.push("smart:tasks");
+      this.saveData(this.settings);
+    }
+    this.addCommand({ id: "open-tasks", name: "Open tasks", callback: () => this.openTasks() });
+    this.addCommand({ id: "whats-new", name: "Show what's new and the guide", callback: () => new WhatsNewModal(this, "new").open() });
     // ```typefold-home``` in any note draws the Home dashboard there (e.g. a Home.md)
     this.homeEmbeds = new Set();
     this.registerMarkdownCodeBlockProcessor("typefold-home", (src, el, ctx) => ctx.addChild(new HomeEmbed(el, this)));
-    this.addRibbonIcon("house", "Home", () => this.openHome());
+    this.addRibbonIcon("house", "Home", () => this.openHome()).addClass("ot-ribbon");
     this.addCommand({ id: "open-home", name: "Open home dashboard", callback: () => this.openHome() });
     this.addCommand({ id: "quick-open", name: "Search and open a page…", callback: () => new QuickOpenModal(this, null).open() });
     this.addCommand({ id: "reveal-file", name: "Reveal current file in navigator", callback: () => this.revealFile(this.app.workspace.getActiveFile()) });
@@ -226,10 +277,11 @@ class TypefoldPlugin extends Plugin {
       await this.saveSettings(false);
       new Notice(this.settings.replaceExplorer ? "Typefold is now your file explorer." : "Core file explorer restored.");
     } });
-    this.addRibbonIcon("shapes", "Typefold", () => this.activateView());
+    this.addRibbonIcon("shapes", "Typefold", () => this.activateView()).addClass("ot-ribbon");
     this.addCommand({ id: "open-sidebar", name: "Open object types navigator", callback: () => this.activateView() });
     this.addCommand({ id: "new-object", name: "Create new object…", callback: () => this.newObjectFlow() });
     this.addCommand({ id: "new-type", name: "Create new object type…", callback: () => new NewTypeModal(this).open() });
+    this.addCommand({ id: "edit-type", name: "Edit object type…", callback: () => new TypePickerModal(this, (key) => new TypeConfigModal(this, key).open()).open() });
     this.addCommand({ id: "toggle-properties", name: "Toggle properties in object notes", callback: () => this.toggleProps() });
     this.addSettingTab(new TypefoldSettingTab(this.app, this));
 
@@ -240,14 +292,41 @@ class TypefoldPlugin extends Plugin {
     this.requestDecorate = debounce(() => this.decorateAll(), 150, true);
     const soft = debounce(() => this.softRefresh(), 900, true);
     this.registerEvent(this.app.metadataCache.on("changed", () => soft()));
+    // TaskNotes updates its cache right after the metadata cache; give it a moment
+    const tasksSoft = debounce(() => this.refreshTasks(), 500, true);
+    this.registerEvent(this.app.metadataCache.on("changed", () => {
+      if (this.app.workspace.getLeavesOfType(TASKS_VIEW).length || this.app.workspace.getLeavesOfType(VIEW_TYPE).some((l) => ["smart:tasks", "smart:calendar"].includes(l.view?.selected))) tasksSoft();
+    }));
+    this.registerEvent(this.app.vault.on("delete", () => tasksSoft()));
     let firstResolve = true;
-    this.registerEvent(this.app.metadataCache.on("resolved", () => { if (firstResolve) { firstResolve = false; this.requestRebuild(); } }));
+    this.registerEvent(this.app.metadataCache.on("resolved", () => {
+      if (!firstResolve) return;
+      firstResolve = false;
+      this.requestRebuild();
+      this.repairFolderBase().catch((e) => console.warn("Typefold: Folder.base", e));
+      this.maybeShowWhatsNew();
+    }));
     this.registerEvent(this.app.vault.on("create", () => this.requestRebuild()));
-    this.registerEvent(this.app.vault.on("delete", () => this.requestRebuild()));
-    const refreshHome = debounce(() => this.app.workspace.getLeavesOfType(HOME_VIEW).forEach((l) => l.view?.render?.()), 1500, true);
+    this.registerEvent(this.app.vault.on("delete", (f) => {
+      if (this.settings.defaultBanners?.[f.path]) { delete this.settings.defaultBanners[f.path]; this.saveData(this.settings); }
+      this.requestRebuild();
+    }));
+    // Home redraws only while it's on screen; a hidden Home is marked and redrawn when shown again
+    const refreshHome = debounce(() => this.app.workspace.getLeavesOfType(HOME_VIEW).forEach((l) => {
+      if (l.view?.containerEl?.isShown?.() === false) { if (l.view) l.view._stale = true; return; }
+      l.view?.render?.();
+    }), 1500, true);
+    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+      if (leaf?.view?._stale && leaf.view.getViewType?.() === HOME_VIEW) { leaf.view._stale = false; leaf.view.render(); }
+    }));
     this.registerEvent(this.app.vault.on("modify", () => refreshHome()));
     this.registerEvent(this.app.vault.on("rename", (f, old) => { this.renamePinned(old, f.path); this.requestRebuild(); }));
-    this.registerEvent(this.app.workspace.on("file-open", (file) => { this.requestDecorate(); this.refreshViews(true); this.autoReveal(file); }));
+    this.registerEvent(this.app.workspace.on("file-open", (file) => {
+      // draw the opened note's header right away; the debounced pass only touches views that changed
+      const v = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (v && v.file === file) this.decorate(v);
+      this.requestDecorate(); this.refreshViews(true); this.autoReveal(file); this.noteRecent(file);
+    }));
     this.registerEvent(this.app.workspace.on("layout-change", () => this.requestDecorate()));
     // hide Obsidian's vault bar while the navigator is the visible left-sidebar tab (our footer replaces it)
     const navShown = () => {
@@ -307,7 +386,7 @@ class TypefoldPlugin extends Plugin {
       });
       if (this.settings.openHomeOnStartup && !this._startedOnce) {
         this._startedOnce = true;
-        const existing = this.app.workspace.getLeavesOfType(HOME_VIEW)[0];
+        const existing = this.homeLeaf();
         if (existing) this.app.workspace.setActiveLeaf(existing, { focus: true });
         else {
           const root = this.app.workspace.getMostRecentLeaf?.(this.app.workspace.rootSplit);
@@ -334,8 +413,11 @@ class TypefoldPlugin extends Plugin {
     const stamp = async () => (await Promise.all(files.map((f) => this.app.vault.adapter.stat(f)))).map((s) => s?.mtime || 0).join(",");
     stamp().then((initial) => {
       this.registerInterval(window.setInterval(async () => {
-        if ((await stamp()) === initial) return;
         const plugins = this.app.plugins, id = this.manifest.id;
+        if (plugins.plugins[id] !== this || !this._loaded) return; // a replaced copy must not keep reloading the live one
+        if ((await stamp()) === initial) return;
+        if (this._reloading) return;
+        this._reloading = true;
         await plugins.disablePlugin(id);
         await plugins.enablePlugin(id);
       }, 2500));
@@ -393,6 +475,7 @@ class TypefoldPlugin extends Plugin {
   typeFolders(key) { return (this.settings.types[key]?.folders || []).map((f) => normalizePath(f)); }
 
   async saveSettings(rebuild = true) {
+    this.bumpDeco();
     await this.saveData(this.settings);
     this.applyBodyClasses();
     if (rebuild) this.rebuild();
@@ -599,6 +682,7 @@ class TypefoldPlugin extends Plugin {
     this.afterIconChange(file);
   }
   afterIconChange(file) {
+    this.bumpDeco();
     this._linkInfo = new Map();
     this.app.workspace.trigger("file-open", file); // Iconize redraws its title icon on file-open
     this.refreshViews();
@@ -610,6 +694,19 @@ class TypefoldPlugin extends Plugin {
     if (this.settings.iconize === "ignore") return null;
     const pl = this.app.plugins?.plugins?.["obsidian-icon-folder"];
     return pl?.data && pl.api ? pl : null;
+  }
+  /** the Iconize custom rule that gives this file an icon above its title (null if none, or set by hand) */
+  iconizeRuleFor(file) {
+    const pl = this.app.plugins?.plugins?.["obsidian-icon-folder"];
+    const st = pl?.data?.settings;
+    if (!file || !st || !st.iconInTitleEnabled || pl.data[file.path]) return null;
+    for (const r of st.rules || []) {
+      if (!r?.rule || (r.for && r.for !== "everything" && r.for !== "files")) continue;
+      let hit = false;
+      try { hit = new RegExp(r.rule).test(file.basename); } catch (e) { hit = file.basename.includes(r.rule); }
+      if (hit) return r;
+    }
+    return null;
   }
   iconizeInfo(path) {
     const pl = this.iconizePlugin();
@@ -698,6 +795,19 @@ class TypefoldPlugin extends Plugin {
   }
 
   /** expand the tree down to (and including) a folder; returns true if anything changed */
+  /** “One folder open at a time”: close every open type/folder except this one and the folders above it */
+  collapseOthers(typeKey, path) {
+    if (!this.settings.oneFolderOpen) return;
+    const ex = this.settings.expanded || {};
+    for (const k of Object.keys(ex)) {
+      if (k.includes(":") && !k.startsWith("fold:")) continue; // tags, archive, … aren't folders
+      if (k === typeKey) continue;
+      const fk = this.parseFolderKey(k);
+      if (fk && fk.type === typeKey && path && (path === fk.path || path.startsWith(fk.path + "/"))) continue;
+      delete ex[k];
+    }
+  }
+
   expandTo(path) {
     if (!path) return false;
     let best = null, bestLen = -1;
@@ -707,6 +817,7 @@ class TypefoldPlugin extends Plugin {
     }
     if (!best) return false;
     const root = this.typeRoot(best);
+    this.collapseOthers(best, path);
     let changed = false;
     const open = (k) => { if (!this.settings.expanded[k]) { this.settings.expanded[k] = true; changed = true; } };
     open(best);
@@ -730,6 +841,7 @@ class TypefoldPlugin extends Plugin {
     const root = this.typeRoot(best);
     const key = path === root ? best : this.folderKey(best, path);
     if (view.selected === key) return view.markActive();
+    this.collapseOthers(best, path);
     this.settings.expanded[best] = true;
     let cur = path;
     while (cur.includes("/") && cur !== root) {
@@ -764,6 +876,7 @@ class TypefoldPlugin extends Plugin {
     const { k } = best;
     const root = this.typeRoot(k);
     let key = path === root ? k : this.folderKey(k, path);
+    this.collapseOthers(k, path);
     this.settings.expanded[k] = true;
     let cur = path;
     while (cur.includes("/") && cur !== root) {
@@ -786,6 +899,7 @@ class TypefoldPlugin extends Plugin {
       // open the tree down to that folder
       const root = this.typeRoot(tk);
       let cur = file.parent.path;
+      this.collapseOthers(tk, file.parent.path);
       this.settings.expanded[tk] = true;
       while (cur && cur !== root && cur.includes("/")) {
         cur = cur.split("/").slice(0, -1).join("/");
@@ -801,6 +915,12 @@ class TypefoldPlugin extends Plugin {
     this.applyExplorerMode();
     document.body.toggleClass("ot-theme", this.settings.themeTweaks);
     document.body.toggleClass("ot-hide-props", !this.propsVisible);
+    const s = this.settings;
+    for (const [cls, on] of [["ot-no-chips", !s.showNoteChips], ["ot-no-page-icons", !s.showPageIcons], ["ot-no-status", !s.showStatusBar],
+      ["ot-no-ribbon", !s.showRibbon], ["ot-no-navfoot", !s.showNavFooter], ["ot-no-navtop", !s.showNavTop],
+      ["ot-hide-iz-typepages", !!s.hideIconizeOnTypePages],
+      ["ot-home-no-greeting", !s.homeGreeting], ["ot-home-no-types", !s.homeTypes], ["ot-home-no-pinned", !s.homePinned], ["ot-home-no-recent", !s.homeRecent]])
+      document.body.toggleClass(cls, !!on);
   }
 
   toggleProps() {
@@ -847,6 +967,7 @@ class TypefoldPlugin extends Plugin {
   }
 
   rebuild() {
+    this.bumpDeco();
     // A note belongs to every registered type whose folder contains it (nested folders → several types).
     // Optionally a type also matches notes whose `type` property equals its name (matchProperty).
     const index = new Map(), fileTypes = new Map();
@@ -889,6 +1010,7 @@ class TypefoldPlugin extends Plugin {
 
   /** a note's content/metadata changed: no need to re-index folders, just refresh what shows it */
   softRefresh() {
+    this.bumpDeco();
     this._tagIndex = null; this.backlinkCache = null; this._linkInfo = new Map();
     if (Object.values(this.settings.types).some((c) => c.matchProperty)) return this.rebuild();
     this.refreshViews();
@@ -932,7 +1054,7 @@ class TypefoldPlugin extends Plugin {
   filesFor(key) {
     if (key === "smart:archive") return this.archivedFiles();
     const out = this._filesFor(key).filter((f) => !this.isArchived(f.path));
-    return key.startsWith("file:") ? out : out.filter((f) => !this.isFolderNote(f));
+    return key.startsWith("file:") || key === "smart:recent" ? out : out.filter((f) => !this.isFolderNote(f));
   }
 
   /** tag (without #) → notes, including notes of child tags */
@@ -977,8 +1099,21 @@ class TypefoldPlugin extends Plugin {
     const fk = this.parseFolderKey(key);
     if (fk) return [...(this.index.get(fk.type)?.files || []).filter((f) => f.path.startsWith(fk.path + "/")), ...this.nonNoteFiles([fk.path])];
     if (key === "smart:inbox") {
+      // every document that isn't in an object type: notes, PDFs, Office files, canvases…
       const root = normalizePath(this.settings.basesFolder || "Typefold") + "/";
-      return this.app.vault.getMarkdownFiles().filter((f) => !this.fileType.has(f.path) && !f.path.startsWith(root));
+      const typeFolders = Object.keys(this.settings.types).filter((k) => !k.includes(":") && this.settings.types[k].registered)
+        .flatMap((k) => this.typeFolders(k).map((f) => f + "/"));
+      const docExt = new Set(["md", "canvas", ...DOC_EXT]);
+      return this.app.vault.getFiles().filter((f) => {
+        if (!docExt.has(f.extension.toLowerCase())) return false;
+        if (f.path.startsWith(root) || f.path.split("/").some((seg) => seg.startsWith("."))) return false;
+        if (f.extension === "md" ? this.fileType.has(f.path) : typeFolders.some((d) => f.path.startsWith(d))) return false;
+        if (f.extension === "md" && (this.isFolderNote(f) || this.isTemplate(f))) return false;
+        return true;
+      });
+    }
+    if (key === "smart:recent") {
+      return (this.settings.recentFiles || []).map((path) => this.app.vault.getAbstractFileByPath(path)).filter((f) => f && f.extension);
     }
     if (key === "smart:tasks") return this.app.vault.getMarkdownFiles().filter((f) =>
       (this.app.metadataCache.getFileCache(f)?.listItems || []).some((li) => li.task === " "));
@@ -997,10 +1132,13 @@ class TypefoldPlugin extends Plugin {
   }
 
   /* ── object types: create / assign ── */
-  async registerType({ label, icon, color, folder, assign, folderNote }) {
+  async registerType({ label, icon, color, folder, assign, folderNote, typePage }) {
     const key = label.trim().toLowerCase();
     const c = this.conf(key);
     Object.assign(c, { label: label.trim(), icon, color, registered: true });
+    // remember the folder-note choice: new subfolders follow it later ("all" only)
+    c.folderNotes = folderNote === true || folderNote === "subs" ? "all" : ["all", "root", "none"].includes(folderNote) ? folderNote : "none";
+    if (typePage === false) c.noPage = true; else if (typePage === true) delete c.noPage;
     delete c.hidden;
     if (folder) c.folders = [...new Set([...(c.folders || []), normalizePath(folder)])];
     const order = (this.settings.typeOrder ||= []);
@@ -1008,9 +1146,15 @@ class TypefoldPlugin extends Plugin {
     await this.saveSettings(false);
     let changed = 0;
     if (folder) {
-      await this.ensureFolder(normalizePath(folder));
+      // creating the folder fires onFolderCreated: keep that from adding a folder note behind our back
+      (this._creatingTypeFolders ||= new Set()).add(normalizePath(folder));
+      try { await this.ensureFolder(normalizePath(folder)); }
+      finally { window.setTimeout(() => this._creatingTypeFolders?.delete(normalizePath(folder)), 3000); }
       if (assign) changed = await this.assignFolder(folder, label.trim());
-      if (folderNote) await this.ensureFolderNotesUnder(folder, label.trim());
+      // folderNote: "all" (folder + subfolders), "root" (only this folder), anything else = none
+      if (folderNote === "all" || folderNote === true) await this.ensureFolderNotesUnder(folder, label.trim());
+      else if (folderNote === "subs") await this.ensureFolderNotesUnder(folder, label.trim(), true);
+      else if (folderNote === "root") await this.ensureFolderNote(normalizePath(folder), label.trim());
     }
     this.rebuild();
     return { key, changed };
@@ -1030,6 +1174,50 @@ class TypefoldPlugin extends Plugin {
     return n;
   }
 
+  folderBasePath() { return normalizePath(`${normalizePath(this.settings.basesFolder || "Typefold")}/Folder.base`); }
+  /** the shared base folder notes embed: lists the notes in the embedding note's folder (and below) */
+  async ensureFolderBase() {
+    const path = this.folderBasePath();
+    if (this.app.vault.getAbstractFileByPath(path)) return;
+    await this.ensureFolder(path.split("/").slice(0, -1).join("/"));
+    const ext = this.hasExtendedBase();
+    const yaml = [
+      "filters:",
+      "  and:",
+      "    - file.inFolder(this.file.folder)",
+      "    - file.path != this.file.path",
+      "    - file.basename != file.folder.split(\"/\")[-1]", // hide subfolders' folder notes
+      "views:",
+      `  - type: ${ext ? "bases" : "table"}`,
+      "    name: Table",
+      "    groupBy:",
+      "      property: file.folder",
+      "      direction: ASC",
+      "    order:",
+      "      - file.name",
+      "      - file.mtime",
+      "    sort:",
+      "      - property: file.mtime",
+      "        direction: DESC",
+      ...(ext ? ["  - type: notion-list", "    name: List", "    order:", "      - file.name", "      - file.mtime"]
+              : ["  - type: cards", "    name: Cards", "    order:", "      - file.name", "      - file.mtime"]),
+      "",
+    ].join("\n");
+    try { await this.app.vault.create(path, yaml); } catch (e) { if (!this.app.vault.getAbstractFileByPath(path)) throw e; }
+  }
+  /** folder notes made by earlier versions point at a Folder.base that was never created: create it once */
+  async repairFolderBase() {
+    const path = this.folderBasePath();
+    if (this.app.vault.getAbstractFileByPath(path)) return;
+    const unresolved = this.app.metadataCache.unresolvedLinks || {};
+    const want = path.replace(/\.base$/, "").toLowerCase();
+    const broken = Object.values(unresolved).some((links) => Object.keys(links).some((l) => {
+      const x = l.toLowerCase().replace(/\.base$/, "");
+      return x === want;
+    }));
+    if (broken) await this.ensureFolderBase();
+  }
+
   folderNoteContent(typeLabel, folderPath) {
     const lines = [];
     let best = null, bestLen = -1;
@@ -1039,13 +1227,14 @@ class TypefoldPlugin extends Plugin {
     }
     if (best) for (const [k, v] of Object.entries(this.folderLevelProps(best, folderPath))) lines.push(`${k}: ${JSON.stringify(v)}`);
     lines.push("cssclasses:", "  - max");
-    return "---\n" + lines.join("\n") + `\n---\n\n![[${normalizePath(this.settings.basesFolder || "Typefold")}/Folder.base]]\n`;
+    return "---\n" + lines.join("\n") + `\n---\n\n![[${this.folderBasePath()}]]\n`;
   }
 
   async ensureFolderNote(folderPath, typeLabel) {
     const st = this.fnSettings();
     if (!st.enabled || !folderPath) return null;
     const existing = this.folderNoteOf(folderPath);
+    await this.ensureFolderBase();
     const content = this.folderNoteContent(typeLabel, folderPath);
     if (existing) {
       if (existing.extension === "md" && !(await this.app.vault.read(existing)).trim())
@@ -1057,12 +1246,12 @@ class TypefoldPlugin extends Plugin {
     return await this.app.vault.create(normalizePath(`${dir ? dir + "/" : ""}${name}.md`), content);
   }
 
-  async ensureFolderNotesUnder(folder, typeLabel) {
+  async ensureFolderNotesUnder(folder, typeLabel, skipRoot = false) {
     const root = this.app.vault.getAbstractFileByPath(normalizePath(folder));
     if (!(root instanceof TFolder)) return;
     const walk = async (fo) => {
       if (fo.name.startsWith(".") || fo.name.startsWith("_")) return;
-      await this.ensureFolderNote(fo.path, typeLabel);
+      if (!(skipRoot && fo === root)) await this.ensureFolderNote(fo.path, typeLabel);
       for (const c of fo.children) if (c instanceof TFolder) await walk(c);
     };
     await walk(root);
@@ -1092,8 +1281,17 @@ class TypefoldPlugin extends Plugin {
     if (folder.name.startsWith(".") || folder.name.startsWith("_")) return;
     await new Promise((r) => setTimeout(r, 900)); // let Folder Notes create its own first
     if (!this.app.vault.getAbstractFileByPath(folder.path)) return;
-    const inType = Object.keys(this.settings.types).some((k) => this.typeFolders(k).some((f) => folder.path.startsWith(f + "/")));
-    if (inType) await this.ensureFolderNote(folder.path, null);
+    if ([...(this._creatingTypeFolders || [])].some((d) => folder.path === d || d.startsWith(folder.path + "/"))) return;
+    // the nearest type this folder sits in decides: only types set to "Folder + subfolders" get notes for new folders
+    let owner = null, len = -1;
+    for (const [k, c] of Object.entries(this.settings.types)) {
+      if (k.includes(":") || !c.registered) continue;
+      for (const f of this.typeFolders(k)) if (folder.path.startsWith(f + "/") && f.length > len) { owner = c; len = f.length; }
+    }
+    if (!owner) return;
+    const choice = owner.folderNotes || "all"; // types made before this choice existed keep the old behaviour
+    if (choice !== "all") return;
+    await this.ensureFolderNote(folder.path, null);
   }
 
   /** custom icon / colour for a folder path, whichever type's tree it was set in */
@@ -1134,7 +1332,7 @@ class TypefoldPlugin extends Plugin {
       location: st.storageLocation || "insideFolder",
       types: (st.supportedFileTypes || ["md", "canvas", "base"]).map((t) => t.replace(/^\./, "")),
       main: (st.folderNoteType || ".md").replace(/^\./, ""),
-      enabled: !!this.app.plugins?.enabledPlugins?.has?.("folder-notes"),
+      enabled: this.settings.useFolderNotes !== false && !!this.app.plugins?.enabledPlugins?.has?.("folder-notes"),
     };
   }
 
@@ -1301,8 +1499,11 @@ class TypefoldPlugin extends Plugin {
       }
     }
     if (removePage) {
-      const page = this.app.vault.getAbstractFileByPath(this.basePath(key, null));
-      if (page) await this.app.vault.trash(page, false);
+      // the type's page is two files: the note you open and the .base it embeds
+      for (const path of [this.typeNotePath(key), this.basePath(key, null)]) {
+        const f = this.app.vault.getAbstractFileByPath(path);
+        if (f) await this.app.vault.trash(f, false);
+      }
     }
     delete this.settings.types[key];
     for (const k of Object.keys(this.settings.types)) if (k.startsWith(`fold:${key}::`)) delete this.settings.types[k];
@@ -1312,6 +1513,240 @@ class TypefoldPlugin extends Plugin {
     if ((this.settings.lastSelected || "").startsWith(key) || (this.settings.lastSelected || "").startsWith(`fold:${key}::`)) this.settings.lastSelected = null;
     await this.saveSettings();
     return { label, changed };
+  }
+
+  calendarMerged() { return !this.settings.splitCalendarTasks; }
+  hasDailyNotes() { return this.app.vault.getMarkdownFiles().some((f) => this.dailyDate(f)); }
+
+  /** Recents: remember opened files, newest first */
+  noteRecent(file) {
+    if (!file || !file.extension) return;
+    const list = (this.settings.recentFiles ||= []);
+    if (list[0] === file.path) return;
+    const i = list.indexOf(file.path);
+    if (i >= 0) list.splice(i, 1);
+    list.unshift(file.path);
+    list.length = Math.min(list.length, 60);
+    (this._saveRecents ||= debounce(() => {
+      this.saveData(this.settings);
+      if (this.settings.showRecents) for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) leaf.view?.render?.();
+    }, 1500, true))();
+  }
+
+  /** once per version: the guide on a fresh install, what's new after an update */
+  async maybeShowWhatsNew() {
+    const s = this.settings, v = this.manifest.version;
+    if (s.lastSeenVersion === v) return;
+    const fresh = !s.lastSeenVersion && !Object.values(s.types || {}).some((c) => c.registered);
+    s.lastSeenVersion = v;
+    await this.saveData(s);
+    if (!s.showWhatsNew) return;
+    window.setTimeout(() => new WhatsNewModal(this, fresh ? "start" : "new").open(), 800);
+  }
+
+  /* ── tasks: TaskNotes tasks when that plugin is on, otherwise `- [ ]` checkboxes in notes ── */
+  taskNotes() {
+    const t = this.app.plugins?.plugins?.tasknotes;
+    return t?.cacheManager?.getAllTasks && t?.taskService ? t : null;
+  }
+  taskPrefs(scope = "all") {
+    this.settings.taskViews ||= {};
+    return (this.settings.taskViews[scope] ||= { mode: "list", bg: null });
+  }
+  async collectTasks() {
+    const out = [];
+    const day = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
+    const hm = (v) => String(v || "").match(/T(\d{2}:\d{2})/)?.[1] || null;
+    const tn = this.settings.taskSource === "tasknotes" ? this.taskNotes() : null;
+    if (tn) {
+      const taskTag = String(tn.settings.taskTag || "task").toLowerCase();
+      const statuses = tn.settings.customStatuses || [];
+      const prios = tn.settings.customPriorities || [];
+      const baseWeight = prios.find((x) => x.value === tn.settings.defaultTaskPriority)?.weight ?? 0;
+      let all = [];
+      try { all = await tn.cacheManager.getAllTasks(); } catch (e) { console.warn("Typefold: TaskNotes tasks", e); }
+      for (const t of all) {
+        if (t.archived) continue;
+        const file = this.app.vault.getAbstractFileByPath(t.path);
+        if (!file) continue;
+        const notes = (t.projects || []).map((pr) => this.app.metadataCache.getFirstLinkpathDest(cleanLink(pr), t.path)).filter(Boolean);
+        const prio = prios.find((x) => x.value === t.priority);
+        out.push({
+          kind: "tn", raw: t, file, notes, title: t.title || file.basename,
+          done: tn.statusManager?.isCompletedStatus?.(t.status) ?? !!statuses.find((s) => s.value === t.status)?.isCompleted,
+          due: day(t.due), scheduled: day(t.scheduled), time: hm(t.scheduled) || hm(t.due),
+          tags: (t.tags || []).filter((x) => String(x).toLowerCase() !== taskTag),
+          prioColor: prio && prio.weight > baseWeight ? prio.color : null,
+          prioLabel: prio && prio.weight > baseWeight ? prio.label || prio.value : null,
+          statusColor: statuses.find((s) => s.value === t.status)?.color || null,
+        });
+      }
+    }
+    if (this.settings.taskSource === "tasks" && this.tasksPlugin()?.cache) out.push(...this.tasksPluginTasks());
+    else if (this.settings.taskSource !== "tasknotes") out.push(...await this.checkboxTasks(this.taskNotes()));
+    return out;
+  }
+  tasksPlugin() { return this.app.plugins?.plugins?.["obsidian-tasks-plugin"] || null; }
+  /** tasks from the Tasks plugin's own cache (respects its global filter); falls back to the checkbox parser */
+  tasksPluginTasks() {
+    const tp = this.tasksPlugin();
+    let list = [];
+    try { list = tp.cache.getTasks?.() || []; } catch (e) { console.warn("Typefold: Tasks plugin cache", e); }
+    const day = (m) => (m && typeof m.format === "function" && m.isValid?.() !== false ? m.format("YYYY-MM-DD") : null);
+    const prio = { "0": ["#FF3B30", "Highest"], "1": ["#FF9500", "High"], "2": ["#FFCC00", "Medium"] };
+    const gf = String(this.tasksGlobalFilter() || "").trim();
+    const out = [];
+    for (const t of list) {
+      const path = t.taskLocation?.path ?? t.path;
+      const line = t.taskLocation?.lineNumber ?? t.lineNumber;
+      const file = path && this.app.vault.getAbstractFileByPath(path);
+      if (!file || line == null) continue;
+      const tags = (t.tags || []).map((x) => String(x).replace(/^#/, "")).filter((x) => !gf || "#" + x !== gf);
+      let title = String(t.description || "");
+      if (gf) title = title.split(gf).join(" ");
+      title = title.replace(/(?:^|\s)#[^\s#]+/g, " ").replace(/\s+/g, " ").trim();
+      if (!title) continue;
+      const done = typeof t.status?.isCompleted === "function" ? t.status.isCompleted() : (t.isDone ?? ["x", "X"].includes(t.status?.symbol));
+      const pr = prio[String(t.priority)] || null;
+      out.push({ kind: "tp", raw: t, file, line, notes: [file], title, done: !!done, due: day(t.dueDate), scheduled: day(t.scheduledDate),
+        time: null, tags, prioColor: pr?.[0] || null, prioLabel: pr?.[1] || null });
+    }
+    return out;
+  }
+  tasksGlobalFilter() {
+    const tp = this.tasksPlugin();
+    try { return tp?.settings?.globalFilter ?? tp?.getSettings?.()?.globalFilter ?? ""; } catch (e) { return ""; }
+  }
+  async checkboxTasks(tn) {
+    const out = [];
+    this._taskLines ||= new Map(); // path -> { mtime, lines }
+    const day = /(\d{4}-\d{2}-\d{2})/.source;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const items = (this.app.metadataCache.getFileCache(file)?.listItems || []).filter((li) => li.task !== undefined);
+      if (!items.length) continue;
+      if (tn && tn.cacheManager.isTaskFile?.(this.app.metadataCache.getFileCache(file)?.frontmatter)) continue;
+      let c = this._taskLines.get(file.path);
+      if (!c || c.mtime !== file.stat.mtime) {
+        c = { mtime: file.stat.mtime, lines: (await this.app.vault.cachedRead(file)).split("\n") };
+        this._taskLines.set(file.path, c);
+      }
+      for (const li of items) {
+        const lineNo = li.position.start.line;
+        const raw = (c.lines[lineNo] || "").replace(/^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+\[.\]\s?/, "");
+        const due = raw.match(new RegExp(`📅\\s*${day}`))?.[1] || raw.match(new RegExp(`\\[?due::\\s*${day}`))?.[1] || null;
+        const scheduled = raw.match(new RegExp(`⏳\\s*${day}`))?.[1] || raw.match(new RegExp(`\\[?scheduled::\\s*${day}`))?.[1] || null;
+        const tags = [...raw.matchAll(/(?:^|\s)#([^\s#]+)/g)].map((m) => m[1]);
+        const title = raw
+          .replace(/\[?\w+::[^\]]*\]?/g, "")
+          .replace(/[📅⏳🛫✅➕❌]️?\s*\d{4}-\d{2}-\d{2}/gu, "")
+          .replace(/🔁️?[^📅⏳🛫✅➕❌🔺⏫🔼🔽⏬]*/gu, "")
+          .replace(/[🔺⏫🔼🔽⏬]️?/gu, "")
+          .replace(/(?:^|\s)#[^\s#]+/g, " ")
+          .replace(/\s+/g, " ").trim();
+        if (!title) continue;
+        const pe = raw.match(/[🔺⏫🔼]/u)?.[0];
+        const prioColor = pe ? { "🔺": "#FF3B30", "⏫": "#FF9500", "🔼": "#FFCC00" }[pe] : null;
+        out.push({ kind: "cb", file, line: lineNo, notes: [file], title, done: li.task !== " ", due, scheduled, time: null, tags, prioColor,
+          prioLabel: pe ? { "🔺": "Highest", "⏫": "High", "🔼": "Medium" }[pe] : null });
+      }
+    }
+    return out;
+  }
+  /** does a task belong to this object type? (its file, a linked project note, or a tag with the type's name) */
+  taskInType(task, key) {
+    if (!key || key === "all") return true;
+    const label = this.labelFor(key).toLowerCase();
+    return [task.file, ...task.notes].some((f) => this.typesOfFile(f).includes(key) || this.typeOfFile(f) === key)
+      || task.tags.some((t) => String(t).toLowerCase() === label || String(t).toLowerCase().endsWith("/" + label));
+  }
+  async toggleTask(task) {
+    if (task.kind === "tp") {
+      // let the Tasks plugin do it (done date, recurrence); otherwise flip the box ourselves
+      const api = this.tasksPlugin()?.apiV1;
+      if (api?.executeToggleTaskDoneCommand) {
+        let ok = false;
+        await this.app.vault.process(task.file, (data) => {
+          const lines = data.split("\n");
+          const l = lines[task.line];
+          if (l == null) return data;
+          const next = api.executeToggleTaskDoneCommand(l, task.file.path);
+          if (typeof next !== "string") return data;
+          lines.splice(task.line, 1, ...next.split("\n"));
+          ok = true;
+          return lines.join("\n");
+        });
+        if (ok) return;
+      }
+    }
+    if (task.kind === "tn") {
+      const tn = this.taskNotes();
+      if (tn) return tn.taskService.toggleStatus(task.raw);
+    }
+    await this.app.vault.process(task.file, (data) => {
+      const lines = data.split("\n");
+      const l = lines[task.line];
+      if (l == null) return data;
+      lines[task.line] = l.replace(/^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+)\[(.)\]/, (m, pre, ch) => `${pre}[${ch === " " ? "x" : " "}]`);
+      return lines.join("\n");
+    });
+  }
+  async deleteTask(task) {
+    if (task.kind === "tn") {
+      const tn = this.taskNotes();
+      if (!tn) throw new Error("TaskNotes isn't enabled");
+      return tn.api.deleteTask(task.file.path);
+    }
+    await this.app.vault.process(task.file, (data) => {
+      const lines = data.split("\n");
+      const l = lines[task.line];
+      // only remove the line if it is still that task (the note may have changed meanwhile)
+      if (l == null || !/^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+\[.\]/.test(l) || !l.includes(task.title.slice(0, 20))) throw new Error("The task line moved; open the note and delete it there.");
+      lines.splice(task.line, 1);
+      return lines.join("\n");
+    });
+  }
+  /** add a task: a TaskNotes task (natural language: "Call mom tomorrow 3pm #family"), or a checkbox in today's daily note */
+  async addTask(text, { date = null, tag = null, field = "any" } = {}) {
+    text = text.trim();
+    if (!text) return;
+    const tn = this.settings.taskSource === "tasknotes" ? this.taskNotes() : null;
+    if (tn) {
+      let parsed = {};
+      try { parsed = tn.api.parseNaturalLanguage(text) || {}; } catch (e) {}
+      const at = (d, t) => (d ? (t ? `${d}T${t}` : d) : undefined);
+      const data = { title: parsed.title || text, tags: [...(parsed.tags || [])], contexts: parsed.contexts || [], projects: parsed.projects || [] };
+      if (parsed.priority) data.priority = parsed.priority;
+      if (parsed.status) data.status = parsed.status;
+      if (parsed.dueDate) data.due = at(parsed.dueDate, parsed.dueTime);
+      if (parsed.scheduledDate) data.scheduled = at(parsed.scheduledDate, parsed.scheduledTime);
+      if (!data.due && !data.scheduled && date) data[field === "due" || field === "scheduled" ? field : tn.settings.nlpDefaultToScheduled === false ? "due" : "scheduled"] = date;
+      if (tag && !data.tags.some((t) => t.toLowerCase() === tag.toLowerCase())) data.tags.push(tag);
+      return tn.api.createTask(data);
+    }
+    const gf = this.settings.taskSource === "tasks" ? String(this.tasksGlobalFilter() || "").trim() : "";
+    let line = `- [ ] ${gf && !text.includes(gf) ? gf + " " : ""}${text}`;
+    if (tag && !new RegExp(`(^|\\s)#${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`, "i").test(text)) line += ` #${tag}`;
+    if (date && !/📅|⏳|due::|scheduled::/.test(text)) line += field === "scheduled" ? ` ⏳ ${date}` : ` 📅 ${date}`;
+    const file = await this.ensureDaily(moment());
+    await this.app.vault.process(file, (data) => (data && !data.endsWith("\n") ? data + "\n" : data) + line + "\n");
+  }
+  async openTask(task, newLeaf = false) {
+    const leaf = this.app.workspace.getLeaf(newLeaf);
+    if (task.kind === "cb") await leaf.openFile(task.file, { eState: { line: task.line } });
+    else await leaf.openFile(task.file);
+  }
+  async openTasks(scope = "all") {
+    const existing = this.app.workspace.getLeavesOfType(TASKS_VIEW)[0];
+    const leaf = existing || this.app.workspace.getLeaf(false);
+    await leaf.setViewState({ type: TASKS_VIEW, active: true, state: { scope } });
+    this.app.workspace.revealLeaf(leaf);
+  }
+  refreshTasks() {
+    for (const leaf of this.app.workspace.getLeavesOfType(TASKS_VIEW)) leaf.view?.render?.();
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const sel = leaf.view?.selected;
+      if (sel === "smart:tasks" || (sel === "smart:calendar" && this.calendarMerged() && this.settings.taskPanelView !== "daily")) leaf.view.render();
+    }
   }
 
   /* ── pins ── */
@@ -1324,6 +1759,12 @@ class TypefoldPlugin extends Plugin {
   }
   renamePinned(oldPath, newPath) {
     for (const p of this.settings.pinned) if (p.kind === "note" && p.id === oldPath) p.id = newPath;
+    const ri = (this.settings.recentFiles || []).indexOf(oldPath);
+    if (ri >= 0) this.settings.recentFiles[ri] = newPath;
+    for (const k of ["defaultBanners", "noteIcons", "bannerStyles"]) {
+      const m = this.settings[k];
+      if (m && oldPath in m) { m[newPath] = m[oldPath]; delete m[oldPath]; }
+    }
     this.saveData(this.settings);
   }
 
@@ -1430,7 +1871,7 @@ class TypefoldPlugin extends Plugin {
       || this.app.vault.getFiles().find((f) => f.path.toLowerCase() === path.toLowerCase()); // e.g. templates.base vs Templates.base
     if (existing) {
       // upgrade pages generated by the first version (plain table/cards) to notion views
-      let txt = await this.app.vault.read(existing);
+      let txt = await this.app.vault.cachedRead(existing);
       // keep the page's views, but switch its filter to the type's folders
       const vi = txt.indexOf("\nviews:");
       if (!fk && vi > 0 && txt.startsWith("filters:")) {
@@ -1465,6 +1906,10 @@ class TypefoldPlugin extends Plugin {
     return normalizePath((folder ? folder + "/" : "") + m.format(format) + ".md");
   }
   async openDaily(m, evt) {
+    return this.openFromPanel(await this.ensureDaily(m), evt);
+  }
+  /** the daily note for this date, created (from the daily template) if missing */
+  async ensureDaily(m) {
     const path = this.dailyPath(m);
     let file = this.app.vault.getAbstractFileByPath(path);
     if (!file) {
@@ -1484,12 +1929,22 @@ class TypefoldPlugin extends Plugin {
       }
       file = await this.app.vault.create(path, body);
     }
-    return this.openFromPanel(file, evt);
+    return file;
   }
 
+  /** type pages (a note + .base listing the type's notes) are made only when allowed: globally and for this type */
+  typePagesAllowed(key) { return this.settings.openBaseOnClick !== false && !this.settings.types[key]?.noPage; }
   async openTypeBase(key, newTab = false) {
+    if (!this.typePagesAllowed(key)) return false;
     try {
-      await this.baseFileFor(key); // keeps the embedded page's filter in sync with the type's folders
+      const note = this.app.vault.getAbstractFileByPath(this.typeNotePath(key));
+      if (note && this.app.vault.getAbstractFileByPath(this.basePath(key, null))) {
+        // open right away; bring the page's filter in line with the type's folders afterwards
+        await this.app.workspace.getLeaf(newTab).openFile(note);
+        this.baseFileFor(key).catch((e) => console.warn("[typefold] base sync", e));
+        return;
+      }
+      await this.baseFileFor(key);
       const file = await this.typeNoteFor(key);
       await this.app.workspace.getLeaf(newTab).openFile(file);
     } catch (e) { console.error("[typefold] could not open base", e); }
@@ -1524,8 +1979,10 @@ class TypefoldPlugin extends Plugin {
   newObjectFlow() { new TypePickerModal(this, (key) => this.createObject(key)).open(); }
 
   async createObject(key, extra = {}) {
-    const fk = this.parseFolderKey(key);
+    let fk = this.parseFolderKey(key);
     if (fk) key = fk.type;
+    const conf = this.settings.types[key] || {};
+    if (conf.newIn === "root") fk = null; // “Always the type's folder”
     const label = this.labelFor(key);
     const folder = normalizePath(fk?.path || this.typeFolders(key)[0] || this.settings.defaultFolder || "/");
     if (folder !== "/" && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
@@ -1536,15 +1993,112 @@ class TypefoldPlugin extends Plugin {
       i++;
     } while (this.app.vault.getAbstractFileByPath(path));
     const props = Object.assign(this.templateProps(key, folder === "/" ? "" : folder), extra);
-    const lines = this.settings.types[key]?.matchProperty || !this.typeFolders(key).length ? [`${this.prop}: ${JSON.stringify(label)}`] : [];
+    // template note: its text, and its properties under ours
+    const tpl = conf.template && this.app.vault.getAbstractFileByPath(normalizePath(conf.template));
+    let body = "";
+    if (tpl && tpl.extension === "md") {
+      const raw = await this.app.vault.cachedRead(tpl);
+      const fmEnd = raw.startsWith("---") ? raw.indexOf("\n---", 3) : -1;
+      const after = fmEnd > 0 ? raw.indexOf("\n", fmEnd + 4) : -1;
+      body = (fmEnd > 0 ? (after < 0 ? "" : raw.slice(after + 1)) : raw)
+        .replace(/\{\{\s*date\s*\}\}/gi, moment().format("YYYY-MM-DD"))
+        .replace(/\{\{\s*time\s*\}\}/gi, moment().format("HH:mm"))
+        .replace(/\{\{\s*title\s*\}\}/gi, base);
+    }
+    const lines = conf.matchProperty || !this.typeFolders(key).length ? [`${this.prop}: ${JSON.stringify(label)}`] : [];
     for (const [k, v] of Object.entries(props)) lines.push(`${k}: ${JSON.stringify(v)}`);
-    const file = await this.app.vault.create(path, lines.length ? `---\n${lines.join("\n")}\n---\n\n` : "");
+    const file = await this.app.vault.create(path, (lines.length ? `---\n${lines.join("\n")}\n---\n\n` : "") + body.replace(/^\n+/, ""));
+    if (tpl) {
+      const tfm = this.app.metadataCache.getFileCache(tpl)?.frontmatter || {};
+      const extraFm = Object.entries(tfm).filter(([k]) => k !== "position" && !(k in props) && k !== this.prop);
+      if (extraFm.length) await this.app.fileManager.processFrontMatter(file, (fm) => {
+        for (const [k, v] of extraFm) if (!(k in fm)) fm[k] = typeof v === "string" ? v.replace(/\{\{\s*date\s*\}\}/gi, moment().format("YYYY-MM-DD")) : v;
+      });
+    }
     await this.app.workspace.getLeaf(false).openFile(file, { eState: { rename: "all" } });
     return file;
   }
 
   /* ── views ── */
+  /* ── property types (Obsidian keeps one type per property name, vault-wide) ── */
+  propType(name) {
+    const m = this.app.metadataTypeManager;
+    try { return m?.getAssignedType?.(name) || m?.getPropertyInfo?.(name)?.type || m?.properties?.[String(name).toLowerCase()]?.type || "text"; }
+    catch (e) { return "text"; }
+  }
+  setPropType(name, type) {
+    const m = this.app.metadataTypeManager;
+    if (!name || !type || this.propType(name) === type) return;
+    try { m?.setType?.(name, type); } catch (e) { console.warn("Typefold: property type", name, e); }
+  }
+  /** the type most notes already use for this property (from their values); "text" when no note has it */
+  inferPropType(name) {
+    if (!name) return "text";
+    const now = Date.now();
+    if (!this._propTypeIdx || now - this._propTypeIdx.at > 5000) {
+      const idx = new Map(); // name(lowercase) → Map(type → count)
+      const kind = (v) => {
+        if (Array.isArray(v)) return "multitext";
+        if (typeof v === "boolean") return "checkbox";
+        if (typeof v === "number") return "number";
+        if (typeof v === "string") {
+          if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return "datetime";
+          if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return "date";
+          return "text";
+        }
+        return null; // null / empty values say nothing about the type
+      };
+      for (const f of this.app.vault.getMarkdownFiles()) {
+        const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+        if (!fm) continue;
+        for (const [k, v] of Object.entries(fm)) {
+          if (k === "position") continue;
+          const t = kind(v);
+          if (!t) continue;
+          const m = idx.get(k.toLowerCase()) || new Map();
+          m.set(t, (m.get(t) || 0) + 1);
+          idx.set(k.toLowerCase(), m);
+        }
+      }
+      this._propTypeIdx = { at: now, idx };
+    }
+    const m = this._propTypeIdx.idx.get(String(name).toLowerCase());
+    if (!m || !m.size) return "text";
+    return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  }
+
+  /** a value as typed in the dialog → what goes into frontmatter for that property type */
+  coerceProp(type, raw) {
+    const v = raw == null ? "" : String(raw).trim();
+    if (type === "checkbox") return v === "true" || v === "1" || v === "yes";
+    if (type === "number") return v === "" ? "" : Number.isFinite(Number(v)) ? Number(v) : v;
+    if (type === "multitext" || type === "tags" || type === "aliases") return v ? v.split(",").map((x) => x.trim()).filter(Boolean) : [];
+    return v;
+  }
+
+  /** the note chosen as Home in settings, if Home is set to a note */
+  homeFile() {
+    if (this.settings.homeMode !== "note" || !this.settings.homeNote) return null;
+    const f = this.app.vault.getAbstractFileByPath(normalizePath(this.settings.homeNote))
+      || this.app.metadataCache.getFirstLinkpathDest(this.settings.homeNote.replace(/\.md$/, ""), "");
+    return f && f.extension ? f : null;
+  }
+  homeLeaf() {
+    const f = this.homeFile();
+    if (!f) return this.app.workspace.getLeavesOfType(HOME_VIEW)[0] || null;
+    let found = null;
+    this.app.workspace.iterateRootLeaves((l) => { if (!found && l.view?.file?.path === f.path) found = l; });
+    return found;
+  }
   async openHome(newTab = false) {
+    const f = this.homeFile();
+    if (f) {
+      const there = this.homeLeaf();
+      if (there && !newTab) { this.app.workspace.setActiveLeaf(there, { focus: true }); this.app.workspace.revealLeaf(there); return; }
+      await this.app.workspace.getLeaf(newTab ? "tab" : false).openFile(f);
+      return;
+    }
+    if (this.settings.homeMode === "note" && this.settings.homeNote) new Notice(`Home note “${this.settings.homeNote}” wasn't found, so the Typefold Home opened instead.`);
     const existing = this.app.workspace.getLeavesOfType(HOME_VIEW)[0];
     if (existing && !newTab) { this.app.workspace.revealLeaf(existing); return; }
     const leaf = this.app.workspace.getLeaf(newTab ? "tab" : false);
@@ -1585,16 +2139,36 @@ class TypefoldPlugin extends Plugin {
     this.updateStatus();
   }
 
+  bumpDeco() { this._decoVer = (this._decoVer || 0) + 1; }
   decorate(view) {
     const file = view.file;
     const root = view.contentEl;
+    // skip views whose note, settings and data haven't changed since they were last drawn
+    const sig = file ? `${file.path}|${file.stat.mtime}|${this._decoVer || 0}` : "";
+    if (file && view._otSig === sig) {
+      if (!view._otObj) return;
+      const titles = root.querySelectorAll(".inline-title").length;
+      if (root.querySelectorAll(".ot-note-chipsrow").length >= titles) return;
+    }
     root.querySelectorAll(".ot-note-header, .ot-related").forEach((el) => el.remove());
+    view._otSig = sig;
     if (!file) return;
     const typeKey = this.typeOfFile(file);
     const fnFolder = this.folderOfFolderNote(file);
     const typePage = this.typePageKey(file);
     view.containerEl.toggleClass("ot-object-note", !!typeKey || !!fnFolder || !!typePage);
     view.containerEl.toggleClass("ot-folder-note", !!fnFolder || !!typePage);
+    view.containerEl.toggleClass("ot-type-page", !!typePage);
+    view._otObj = !!(typeKey || fnFolder || typePage);
+    // the editor may not have drawn the title yet: try again on the next frames (a few times at most)
+    if (view._otObj && !root.querySelector(".inline-title")) {
+      view._otSig = null;
+      const n = (view._otTries || 0) + 1;
+      view._otTries = n;
+      if (n <= 12) requestAnimationFrame(() => { if (view.file === file) this.decorate(view); });
+      return;
+    }
+    view._otTries = 0;
 
     if (typeKey || fnFolder || typePage) {
       root.querySelectorAll(".inline-title").forEach((title) => {
@@ -1642,15 +2216,23 @@ class TypefoldPlugin extends Plugin {
 
   renderTypePageHeader(header, file, key, view) {
     const color = this.colorFor(key);
+    const rule = !this.settings.hideIconizeOnTypePages && !this.settings.iconizeHintDismissed ? this.iconizeRuleFor(file) : null;
+    if (rule) {
+      const hint = header.createDiv("ot-hint");
+      setIcon(hint.createSpan("ot-hint-icon"), "info");
+      const tx = hint.createDiv("ot-hint-text");
+      tx.createSpan({ text: `The icon above the title comes from your Iconize rule “${rule.rule}”, which also matches “${file.basename}”. ` });
+      tx.createSpan({ cls: "ot-hint-sub", text: "Hide it on type pages, or narrow the rule in Iconize (e.g. ^" + rule.rule + "$)." });
+      const acts = hint.createDiv("ot-hint-acts");
+      const btn = (text, fn, cta) => { const b = acts.createEl("button", { text, cls: cta ? "mod-cta" : "" }); b.onclick = fn; };
+      btn("Hide on type pages", async () => { this.settings.hideIconizeOnTypePages = true; await this.saveSettings(false); this.decorateAll(); }, true);
+      btn("Open Iconize settings", () => { try { this.app.setting.open(); this.app.setting.openTabById("obsidian-icon-folder"); } catch (e) {} });
+      btn("Don't show again", async () => { this.settings.iconizeHintDismissed = true; await this.saveSettings(false); this.decorateAll(); });
+    }
     if (this.settings.showBanner) {
       const src = this.thumbnailFor(file, true);
-      if (src) header.createDiv("ot-banner").createEl("img", { attr: { src } });
-      else {
-        const b = header.createDiv("ot-banner ot-banner-generated");
-        b.style.setProperty("--ot-color", color);
-        setIcon(b.createDiv("ot-banner-glyph"), this.iconFor(key));
-        b.createDiv({ cls: "ot-banner-path", text: this.typeFolders(key).join("  ·  ") || "Object type" });
-      }
+      if (src) this.bannerImage(header, src, file.path, file);
+      else this.drawTypeBanner(header, key);
     }
     const chips = header.createDiv("ot-chips");
     const openInNav = () => this.activateView().then(() => this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view?.select(key, { noOpen: true }));
@@ -1681,7 +2263,7 @@ class TypefoldPlugin extends Plugin {
     const color = fstyle?.color || (typeKey ? this.colorFor(typeKey) : "var(--ot-accent)");
     if (this.settings.showBanner) {
       const src = this.thumbnailFor(file, true);
-      if (src) header.createDiv("ot-banner").createEl("img", { attr: { src } });
+      if (src) this.bannerImage(header, src, file.path, file);
       else if (fnFolder) {
         // folder notes without a cover get a generated banner in the type colour
         const b = header.createDiv("ot-banner ot-banner-generated");
@@ -1689,7 +2271,7 @@ class TypefoldPlugin extends Plugin {
         setIcon(b.createDiv("ot-banner-glyph"), fstyle?.icon || "folder-open");
         const crumbs = b.createDiv("ot-banner-path");
         crumbs.setText(fnFolder.path.split("/").join("  ›  "));
-      }
+      } else if (this.usesDefaultBanner(file)) this.drawDefaultBanner(header, file);
     }
     const chips = header.createDiv("ot-chips");
     const openInNav = (k) => this.activateView().then(() => this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view?.select(k));
@@ -1744,15 +2326,27 @@ class TypefoldPlugin extends Plugin {
       else new NoteIconModal(this, file).open();
     };
 
-    const hasBanner = !!this.bannerKey(file);
+    const hasBanner = !!this.bannerKey(file) || (this.usesDefaultBanner(file) && !!this.defaultBannerSource(file));
     const bbtn = chips.createDiv("ot-chip-btn");
     setIcon(bbtn, hasBanner ? "image" : "image-plus");
     bbtn.setAttr("aria-label", hasBanner ? "Banner" : "Add banner");
     bbtn.onclick = (evt) => {
       if (!hasBanner) return new BannerPickerModal(this, file).open();
       const m = new Menu();
+      const box = view?.containerEl.querySelector(".ot-banner");
+      const bpath = box?.dataset.bannerPath;
+      if (box && bpath) {
+        const st = this.bannerStyle(bpath);
+        m.addItem((i) => i.setTitle("Fill").setIcon("maximize").setChecked(st.fit === "fill").onClick(async () => { await this.setBannerStyle(bpath, { fit: "fill" }); this.applyBannerStyle(box, bpath); }));
+        m.addItem((i) => i.setTitle("Fit").setIcon("minimize").setChecked(st.fit === "fit").onClick(async () => { await this.setBannerStyle(bpath, { fit: "fit" }); this.applyBannerStyle(box, bpath); }));
+        if (st.fit === "fill") m.addItem((i) => i.setTitle("Reposition").setIcon("move").onClick(() => this.repositionBanner(box, bpath)));
+        m.addSeparator();
+      }
       m.addItem((i) => i.setTitle("Change banner").setIcon("image").onClick(() => new BannerPickerModal(this, file).open()));
-      m.addItem((i) => i.setTitle("Remove banner").setIcon("trash-2").onClick(() => this.setBanner(file, null)));
+      m.addItem((i) => i.setTitle("Remove banner").setIcon("trash-2").onClick(async () => {
+        if (this.usesDefaultBanner(file)) await this.setDefaultBanner(file, false);
+        if (this.bannerKey(file)) await this.setBanner(file, null);
+      }));
       m.showAtMouseEvent(evt);
     };
     if (cols.length) {
@@ -1770,12 +2364,144 @@ class TypefoldPlugin extends Plugin {
     }
   }
 
+  /** notes set to "Default banner" show their nearest object type's banner (kept in settings, not in the note) */
+  usesDefaultBanner(file) { return !!(file && this.settings.defaultBanners?.[file.path]); }
+  /** banners a note can borrow, nearest first: folder notes above it that have an image banner, then its object types */
+  bannerSources(file) {
+    const out = [];
+    if (!file) return out;
+    for (let fo = file.parent; fo && fo.path !== "/"; fo = fo.parent) {
+      const fn = this.folderNoteOf(fo.path);
+      if (!fn || fn === file) continue;
+      const src = this.thumbnailFor(fn, true);
+      if (src) out.push({ id: "note:" + fn.path, label: fo.name, kind: "Folder banner", src, file: fn });
+    }
+    for (const tk of this.typesOfFile(file)) {
+      const b = this.typeBanner(tk);
+      out.push({ id: "type:" + tk, label: this.labelFor(tk), kind: "Object type banner", src: b.src, typeKey: tk, banner: b });
+    }
+    return out;
+  }
+  defaultBannerSource(file) {
+    const want = this.settings.defaultBanners?.[file.path];
+    if (!want) return null;
+    const all = this.bannerSources(file);
+    return all.find((x) => x.id === want) || all.find((x) => x.typeKey) || all[0] || null;
+  }
+  drawDefaultBanner(parent, file) {
+    const src = this.defaultBannerSource(file);
+    if (!src) return false;
+    if (src.typeKey) this.drawTypeBanner(parent, src.typeKey);
+    else this.bannerImage(parent, src.src, src.file.path, src.file);
+    return true;
+  }
+  async setDefaultBanner(file, on) {
+    this.settings.defaultBanners ||= {};
+    if (on) this.settings.defaultBanners[file.path] = typeof on === "string" ? on : true;
+    else delete this.settings.defaultBanners[file.path];
+    await this.saveSettings(false);
+    this.afterIconChange(file);
+  }
+  /** the banner an object type's page shows: its page's cover image, or the generated one in the type colour */
+  typeBanner(key) {
+    const page = this.app.vault.getAbstractFileByPath(this.typeNotePath(key));
+    const src = page ? this.thumbnailFor(page, true) : null;
+    return { key, src, page, color: this.colorFor(key), icon: this.iconFor(key), text: this.typeFolders(key).join("  ·  ") || "Object type" };
+  }
+  drawTypeBanner(parent, key) {
+    const b = this.typeBanner(key);
+    if (b.src) { this.bannerImage(parent, b.src, b.page.path, b.page); return; }
+    const el = parent.createDiv("ot-banner ot-banner-generated");
+    el.style.setProperty("--ot-color", b.color);
+    setIcon(el.createDiv("ot-banner-glyph"), b.icon);
+    el.createDiv({ cls: "ot-banner-path", text: b.text });
+  }
+
+  /* ── banner fill / fit / position (per note, kept in settings) ── */
+  bannerStyle(path) { return Object.assign({ fit: "fill", x: 50, y: 50 }, this.settings.bannerStyles?.[path] || {}); }
+  async setBannerStyle(path, patch) {
+    this.settings.bannerStyles ||= {};
+    const next = Object.assign(this.bannerStyle(path), patch);
+    if (next.fit === "fill" && next.x === 50 && next.y === 50) delete this.settings.bannerStyles[path];
+    else this.settings.bannerStyles[path] = next;
+    await this.saveData(this.settings);
+  }
+  applyBannerStyle(box, path) {
+    const st = this.bannerStyle(path), img = box.querySelector("img");
+    box.toggleClass("is-fit", st.fit === "fit");
+    if (img) img.style.setProperty("object-position", `${st.x}% ${st.y}%`, "important");
+  }
+  bannerImage(parent, src, path, file) {
+    const box = parent.createDiv("ot-banner");
+    box.createEl("img", { attr: { src } });
+    box.dataset.bannerPath = path;
+    this.applyBannerStyle(box, path);
+    box.oncontextmenu = (evt) => { evt.preventDefault(); this.bannerMenu(evt, box, path, file); };
+    return box;
+  }
+  bannerMenu(evt, box, path, file) {
+    const st = this.bannerStyle(path);
+    const m = new Menu();
+    m.addItem((i) => i.setTitle("Fill").setIcon("maximize").setChecked(st.fit === "fill").onClick(async () => { await this.setBannerStyle(path, { fit: "fill" }); this.applyBannerStyle(box, path); }));
+    m.addItem((i) => i.setTitle("Fit").setIcon("minimize").setChecked(st.fit === "fit").onClick(async () => { await this.setBannerStyle(path, { fit: "fit" }); this.applyBannerStyle(box, path); }));
+    if (st.fit === "fill") m.addItem((i) => i.setTitle("Reposition").setIcon("move").onClick(() => this.repositionBanner(box, path)));
+    if (st.x !== 50 || st.y !== 50) m.addItem((i) => i.setTitle("Reset position").setIcon("rotate-ccw").onClick(async () => { await this.setBannerStyle(path, { x: 50, y: 50 }); this.applyBannerStyle(box, path); }));
+    if (file && file.path === path && this.bannerKey(file)) {
+      m.addSeparator();
+      m.addItem((i) => i.setTitle("Change banner").setIcon("image").onClick(() => new BannerPickerModal(this, file).open()));
+      m.addItem((i) => i.setTitle("Remove banner").setIcon("trash-2").onClick(() => this.setBanner(file, null)));
+    }
+    m.showAtMouseEvent(evt);
+  }
+  /** drag the image inside the banner (mouse or touch), then Save */
+  repositionBanner(box, path) {
+    const img = box.querySelector("img");
+    if (!img || box.hasClass("is-repositioning")) return;
+    const start = this.bannerStyle(path);
+    let { x, y } = start;
+    box.addClass("is-repositioning");
+    const bar = box.createDiv("ot-banner-reposition");
+    bar.createSpan({ cls: "ot-banner-reposition-hint", text: "Drag the image to reposition" });
+    const cancel = bar.createEl("button", { text: "Cancel" });
+    const save = bar.createEl("button", { cls: "mod-cta", text: "Save" });
+    const finish = async (keep) => {
+      box.removeClass("is-repositioning");
+      bar.remove();
+      box.onpointerdown = null;
+      if (keep) await this.setBannerStyle(path, { x: Math.round(x), y: Math.round(y) });
+      else ({ x, y } = start);
+      this.applyBannerStyle(box, path);
+    };
+    cancel.onclick = (e) => { e.stopPropagation(); finish(false); };
+    save.onclick = (e) => { e.stopPropagation(); finish(true); };
+    box.onpointerdown = (e) => {
+      if (e.target.closest(".ot-banner-reposition")) return;
+      e.preventDefault();
+      try { box.setPointerCapture(e.pointerId); } catch (err) {}
+      const bw = box.clientWidth, bh = box.clientHeight;
+      const nw = img.naturalWidth || bw, nh = img.naturalHeight || bh;
+      const scale = Math.max(bw / nw, bh / nh);
+      const overX = nw * scale - bw, overY = nh * scale - bh; // how far the covered image overflows the box
+      const sx = e.clientX, sy = e.clientY, x0 = x, y0 = y;
+      const move = (ev) => {
+        if (overX > 1) x = Math.min(100, Math.max(0, x0 - ((ev.clientX - sx) / overX) * 100));
+        if (overY > 1) y = Math.min(100, Math.max(0, y0 - ((ev.clientY - sy) / overY) * 100));
+        img.style.setProperty("object-position", `${x}% ${y}%`, "important");
+      };
+      const up = () => { box.removeEventListener("pointermove", move); box.removeEventListener("pointerup", up); box.removeEventListener("pointercancel", up); };
+      box.addEventListener("pointermove", move);
+      box.addEventListener("pointerup", up);
+      box.addEventListener("pointercancel", up);
+    };
+  }
+
   bannerKey(file) {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
     return THUMB_KEYS.find((k) => this.resolveImage(fm[k], file.path)) || null;
   }
 
   async setBanner(file, value) {
+    if (value != null && this.usesDefaultBanner(file)) { delete this.settings.defaultBanners[file.path]; await this.saveData(this.settings); }
     const existing = this.bannerKey(file);
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       if (value == null) { if (existing) delete fm[existing]; }
@@ -2008,14 +2734,21 @@ class HomeView extends ItemView {
     nb.onclick = () => p.newObjectFlow();
 
     /* object types */
-    const sec1 = wrap.createDiv("ot-home-section");
+    const sec1 = wrap.createDiv("ot-home-section ot-home-sec-types");
     const t1 = sec1.createDiv("ot-home-title");
     t1.createSpan({ text: "Object types" });
+    const toggleOnHome = async (key) => {
+      const c = p.conf(key);
+      if (c.hideOnHome) delete c.hideOnHome; else c.hideOnHome = true;
+      await p.saveSettings(false);
+      p.refreshViews();
+    };
     this.sectionMenu(t1, [
       ["Notes per card", [0, 1, 3, 5].map((n) => [n ? `${n}` : "None", () => this.setHome({ typeNotes: n }), this.hs().typeNotes === n])],
+      ["Show on Home", p.visibleTypes().map((t) => [t.label, () => toggleOnHome(t.key), !p.settings.types[t.key]?.hideOnHome])],
     ]);
     const grid = sec1.createDiv("ot-home-types");
-    for (const t of p.visibleTypes()) {
+    for (const t of p.visibleTypes().filter((x) => !p.settings.types[x.key]?.hideOnHome)) {
       const card = grid.createDiv("ot-home-type");
       card.style.setProperty("--ot-color", p.colorFor(t.key));
       const top = card.createDiv("ot-home-type-top");
@@ -2049,7 +2782,7 @@ class HomeView extends ItemView {
     /* pinned */
     const pins = p.settings.pinned.map((x) => x.kind === "note" && this.app.vault.getAbstractFileByPath(x.id)).filter(Boolean);
     if (pins.length) {
-      const sec = wrap.createDiv("ot-home-section");
+      const sec = wrap.createDiv("ot-home-section ot-home-sec-pinned");
       sec.createDiv({ cls: "ot-home-title", text: "Pinned" });
       const g = sec.createDiv("ot-home-recent");
       pins.forEach((f) => this.noteCard(g, f));
@@ -2057,7 +2790,7 @@ class HomeView extends ItemView {
 
     /* recently edited */
     const hs = this.hs();
-    const sec2 = wrap.createDiv("ot-home-section");
+    const sec2 = wrap.createDiv("ot-home-section ot-home-sec-recent");
     const t2 = sec2.createDiv("ot-home-title");
     t2.createSpan({ text: "Recently edited" });
     const vt = t2.createDiv("ot-home-viewtoggle");
@@ -2199,6 +2932,451 @@ class HomeView extends ItemView {
 }
 
 /* Home drawn inside a note's ```typefold-home``` block: same rendering as HomeView */
+/* ───────────── Tasks: Month / Week / Day / List, for everything or one object type ───────────── */
+class TasksView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.scope = "all";
+    this.cursor = moment().startOf("day");
+    this.collapsed = new Set(["done"]);
+  }
+  getViewType() { return TASKS_VIEW; }
+  getDisplayText() { return this.scope === "all" ? "Tasks" : `${this.plugin.labelFor(this.scope)} · Tasks`; }
+  getIcon() { return "circle-check"; }
+  getState() { return { scope: this.scope, date: this.cursor.format("YYYY-MM-DD") }; }
+  async setState(state, result) {
+    if (state?.scope) this.scope = state.scope;
+    if (state?.date) this.cursor = moment(state.date, "YYYY-MM-DD");
+    await super.setState(state, result);
+    this.leaf.updateHeader?.();
+    this.render();
+  }
+  async onOpen() {
+    this.contentEl.addClass("ot-tasks-root");
+    this.render();
+  }
+  prefs() { return this.plugin.taskPrefs(this.scope); }
+  async setPref(patch) {
+    Object.assign(this.prefs(), patch);
+    await this.plugin.saveSettings(false);
+    this.render();
+  }
+
+  async render() {
+    const seq = (this._seq = (this._seq || 0) + 1);
+    const p = this.plugin;
+    const tasks = (await p.collectTasks()).filter((t) => p.taskInType(t, this.scope));
+    if (seq !== this._seq) return; // a newer render started meanwhile
+    const pr = this.prefs();
+    const mode = pr.mode || "list";
+    const scrollTop = this.contentEl.querySelector(".ot-tasks-body")?.scrollTop || 0;
+    const root = this.contentEl;
+    root.empty();
+    this.applyBackground(root, pr.bg);
+
+    const wrap = root.createDiv("ot-tasks-wrap");
+    const head = wrap.createDiv("ot-tasks-head");
+    const title = head.createDiv("ot-tasks-title");
+    paintIcon(title.createSpan(), this.scope === "all" ? "circle-check" : p.iconFor(this.scope), this.scope === "all" ? "#34C759" : p.colorFor(this.scope));
+    const name = title.createSpan({ cls: "ot-tasks-name", text: this.scope === "all" ? "Tasks" : p.labelFor(this.scope) });
+    setIcon(title.createSpan("ot-tasks-caret"), "chevron-down");
+    title.setAttr("aria-label", "Choose object type");
+    title.onclick = (evt) => this.scopeMenu(evt);
+    const open = tasks.filter((t) => !t.done).length;
+    head.createSpan({ cls: "ot-tasks-count", text: `${open} open` });
+    head.createDiv("ot-spacer");
+    const tn = p.settings.taskSource === "tasknotes" ? p.taskNotes() : null;
+    if (tn) {
+      const nb = head.createDiv("ot-tasks-new");
+      setIcon(nb.createSpan(), "plus");
+      nb.createSpan({ text: "New task" });
+      nb.onclick = () => this.app.commands.executeCommandById("tasknotes:create-new-task");
+    }
+    const more = head.createDiv("clickable-icon ot-tasks-more");
+    setIcon(more, "more-horizontal");
+    more.setAttr("aria-label", "View options");
+    more.onclick = (evt) => this.optionsMenu(evt);
+
+    const bar = wrap.createDiv("ot-tasks-bar");
+    const seg = bar.createDiv("ot-tasks-seg");
+    for (const [m, label] of [["month", "Month"], ["week", "Week"], ["day", "Day"], ["list", "List"]]) {
+      const b = seg.createDiv({ cls: "ot-tasks-seg-btn" + (m === mode ? " is-active" : ""), text: label });
+      b.onclick = () => this.setPref({ mode: m });
+    }
+    if (mode !== "list") {
+      const nav = bar.createDiv("ot-tasks-nav");
+      const unit = mode === "month" ? "month" : mode === "week" ? "week" : "day";
+      const step = (n) => { this.cursor = this.cursor.clone().add(n, unit); this.render(); };
+      const prev = nav.createDiv("clickable-icon"); setIcon(prev, "chevron-left"); prev.onclick = () => step(-1);
+      const today = nav.createDiv({ cls: "ot-tasks-today", text: "Today" });
+      today.onclick = () => { this.cursor = moment().startOf("day"); this.render(); };
+      const next = nav.createDiv("clickable-icon"); setIcon(next, "chevron-right"); next.onclick = () => step(1);
+      nav.createDiv({ cls: "ot-tasks-period", text: this.periodLabel(mode) });
+    }
+
+    this.addBoxes = new Map();
+    this.dateField = pr.dateField || "any";
+    this.addTag = this.scope !== "all" && !/\s/.test(p.labelFor(this.scope)) ? p.labelFor(this.scope) : null;
+    const body = wrap.createDiv(`ot-tasks-body ot-tasks-${mode}`);
+    const shown = p.settings.taskShowDone ? tasks : tasks.filter((t) => !t.done);
+    if (mode === "month") this.renderMonth(body, shown);
+    else if (mode === "week") this.renderWeek(body, shown);
+    else if (mode === "day") this.renderDay(body, shown);
+    else this.renderList(body, tasks);
+    if (!tasks.length) {
+      const e = body.createDiv("ot-tasks-empty");
+      e.setText(tn ? "No tasks here yet."
+        : p.settings.taskSource === "tasknotes" ? "Task source is TaskNotes, but the TaskNotes plugin isn't enabled."
+        : "No tasks yet. Write “- [ ] something” in any note.");
+    }
+    body.scrollTop = scrollTop;
+  }
+
+  applyBackground(root, bg) {
+    root.toggleClass("has-bg", !!bg);
+    root.style.removeProperty("--ot-tasks-bg-image");
+    root.style.removeProperty("--ot-tasks-bg-color");
+    if (!bg) return;
+    if (bg.color) root.style.setProperty("--ot-tasks-bg-color", bg.color);
+    if (bg.image) {
+      let src = bg.image;
+      if (!/^https?:\/\//.test(src)) {
+        const f = this.app.vault.getAbstractFileByPath(src);
+        src = f ? this.app.vault.getResourcePath(f) : null;
+      }
+      if (src) root.style.setProperty("--ot-tasks-bg-image", `url("${src.replace(/"/g, '\\"')}")`);
+    }
+  }
+
+  periodLabel(mode) {
+    const c = this.cursor;
+    if (mode === "month") return c.format("MMMM YYYY");
+    if (mode === "day") return c.format("dddd, MMM D");
+    const s = this.weekStart(c), e = s.clone().add(6, "day");
+    return s.isSame(e, "month") ? `${s.format("MMM D")} – ${e.format("D")}` : `${s.format("MMM D")} – ${e.format("MMM D")}`;
+  }
+  firstDay() {
+    const fd = this.plugin.taskNotes()?.settings?.calendarViewSettings?.firstDay;
+    return typeof fd === "number" ? fd : 1;
+  }
+  weekStart(d) {
+    const fd = this.firstDay();
+    return d.clone().startOf("day").subtract((d.day() - fd + 7) % 7, "day");
+  }
+  /** which date places a task: "due", "scheduled", or "any" (due, else scheduled) */
+  dateOf(t) {
+    const f = this.dateField || "any";
+    return f === "due" ? t.due : f === "scheduled" ? t.scheduled : t.due || t.scheduled;
+  }
+  dateKind(t) {
+    const f = this.dateField || "any";
+    return f === "any" ? (t.due ? "due" : "scheduled") : f;
+  }
+  byDay(tasks) {
+    const m = new Map();
+    for (const t of tasks) {
+      const d = this.dateOf(t);
+      if (!d) continue;
+      if (!m.has(d)) m.set(d, []);
+      m.get(d).push(t);
+    }
+    for (const list of m.values()) list.sort((a, b) => (a.done - b.done) || String(a.time || "99").localeCompare(String(b.time || "99")));
+    return m;
+  }
+
+  renderMonth(body, tasks) {
+    const days = this.byDay(tasks);
+    const today = moment().format("YYYY-MM-DD");
+    const first = this.cursor.clone().startOf("month");
+    const start = this.weekStart(first);
+    const weeks = Math.ceil((first.diff(start, "days") + first.daysInMonth()) / 7);
+    const grid = body.createDiv("ot-month");
+    for (let i = 0; i < 7; i++) grid.createDiv({ cls: "ot-month-dow", text: start.clone().add(i, "day").format("ddd") });
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = start.clone().add(i, "day"), key = d.format("YYYY-MM-DD");
+      const cell = grid.createDiv("ot-month-cell");
+      if (!d.isSame(first, "month")) cell.addClass("is-other");
+      if (key === today) cell.addClass("is-today");
+      cell.createDiv({ cls: "ot-month-num", text: String(d.date()) });
+      const list = days.get(key) || [];
+      const pills = cell.createDiv("ot-month-pills");
+      for (const t of list.slice(0, 3)) this.pill(pills, t);
+      if (list.length > 3) pills.createDiv({ cls: "ot-month-more", text: `+${list.length - 3} more` });
+      if (list.length) {
+        const dots = cell.createDiv("ot-month-dots");
+        for (const t of list.slice(0, 4)) dots.createSpan({ cls: "ot-month-dot" + (t.done ? " is-done" : "") });
+      }
+      cell.onclick = (evt) => {
+        if (evt.target.closest(".ot-task-pill")) return;
+        this.cursor = d.clone();
+        this.setPref({ mode: "day" });
+      };
+    }
+  }
+
+  renderWeek(body, tasks) {
+    const days = this.byDay(tasks);
+    const today = moment().format("YYYY-MM-DD");
+    const start = this.weekStart(this.cursor);
+    const cols = body.createDiv("ot-week");
+    for (let i = 0; i < 7; i++) {
+      const d = start.clone().add(i, "day"), key = d.format("YYYY-MM-DD");
+      const col = cols.createDiv("ot-week-col");
+      if (key === today) col.addClass("is-today");
+      const h = col.createDiv("ot-week-head");
+      h.createSpan({ cls: "ot-week-dow", text: d.format("ddd") });
+      h.createSpan({ cls: "ot-week-num", text: String(d.date()) });
+      h.onclick = () => { this.cursor = d.clone(); this.setPref({ mode: "day" }); };
+      const list = col.createDiv("ot-week-list");
+      for (const t of days.get(key) || []) this.taskRow(list, t, { compact: true, hideDate: true });
+      this.addSlot("w-" + key, list, key);
+      col.ondblclick = (evt) => { if (!evt.target.closest(".ot-task-row, .ot-task-add, .ot-week-head")) this.startAdd("w-" + key, key); };
+    }
+  }
+
+  renderDay(body, tasks) {
+    const key = this.cursor.format("YYYY-MM-DD");
+    const isToday = this.cursor.isSame(moment(), "day");
+    if (isToday) {
+      const overdue = tasks.filter((t) => !t.done && this.dateOf(t) && this.dateOf(t) < key);
+      if (overdue.length) this.group(body, "overdue", "Overdue", overdue, { warn: true });
+    }
+    const list = this.byDay(tasks).get(key) || [];
+    this.group(body, "day", isToday ? "Today" : this.cursor.format("dddd"), list, { hideDate: true, always: true, addDate: key });
+  }
+
+  renderList(body, all) {
+    const p = this.plugin;
+    const today = moment().startOf("day");
+    const key = (d) => d.format("YYYY-MM-DD");
+    const t0 = key(today), t1 = key(today.clone().add(1, "day")), t7 = key(today.clone().add(7, "day"));
+    const open = all.filter((t) => !t.done);
+    const sortD = (a, b) => String(this.dateOf(a)).localeCompare(String(this.dateOf(b))) || String(a.time || "99").localeCompare(String(b.time || "99"));
+    const g = (fn) => open.filter(fn).sort(sortD);
+    this.group(body, "overdue", "Overdue", g((t) => this.dateOf(t) && this.dateOf(t) < t0), { warn: true });
+    this.group(body, "today", "Today", g((t) => this.dateOf(t) === t0), { hideDate: true, always: true, addDate: t0 });
+    this.group(body, "tomorrow", "Tomorrow", g((t) => this.dateOf(t) === t1), { hideDate: true, addDate: t1 });
+    this.group(body, "week", "Next 7 days", g((t) => this.dateOf(t) > t1 && this.dateOf(t) <= t7));
+    this.group(body, "later", "Later", g((t) => this.dateOf(t) > t7));
+    this.group(body, "nodate", "No date", open.filter((t) => !this.dateOf(t)).sort((a, b) => b.file.stat.mtime - a.file.stat.mtime), { addDate: null });
+    if (p.settings.taskShowDone) {
+      const done = all.filter((t) => t.done).sort((a, b) => b.file.stat.mtime - a.file.stat.mtime);
+      this.group(body, "done", "Completed", done);
+    }
+  }
+
+  group(body, id, label, list, opts = {}) {
+    if (!list.length && !opts.always) return;
+    const sec = body.createDiv("ot-tasks-group");
+    const h = sec.createDiv("ot-tasks-group-head" + (opts.warn ? " is-warn" : ""));
+    const chev = h.createSpan("ot-tasks-chev");
+    setIcon(chev, this.collapsed.has(id) ? "chevron-right" : "chevron-down");
+    h.createSpan({ text: label });
+    h.createSpan({ cls: "ot-tasks-group-n", text: String(list.length) });
+    h.onclick = () => { this.collapsed.has(id) ? this.collapsed.delete(id) : this.collapsed.add(id); this.render(); };
+    const addable = opts.addDate !== undefined;
+    if (addable) {
+      const plus = h.createSpan("clickable-icon ot-tasks-group-add");
+      setIcon(plus, "plus");
+      plus.setAttr("aria-label", "Add a task here");
+      plus.onclick = (evt) => { evt.stopPropagation(); this.startAdd(id, opts.addDate); };
+      sec.ondblclick = (evt) => {
+        if (evt.target.closest(".ot-task-row, .ot-task-pill, .ot-task-add, .ot-tasks-group-head")) return;
+        this.startAdd(id, opts.addDate);
+      };
+    }
+    if (this.collapsed.has(id)) return;
+    const box = sec.createDiv("ot-tasks-list");
+    if (!list.length) box.createDiv({ cls: "ot-tasks-none", text: addable ? "Nothing yet — double-click to add." : "Nothing scheduled." });
+    for (const t of list) this.taskRow(box, t, opts);
+    if (addable) this.addSlot(id, box, opts.addDate);
+  }
+
+  /* ── double-click a place to add a task there, with that place's date ── */
+  addState() { return (this._addState ||= {}); }
+  startAdd(id, date) {
+    const st = this.addState();
+    if (this.collapsed?.has(id)) { this.collapsed.delete(id); st.open = id; this.render(); return; }
+    const box = this.addBoxes?.get(id);
+    if (box) this.inlineAdd(box, date, id);
+    else { st.open = id; this.render(); }
+  }
+  addSlot(id, box, date) {
+    (this.addBoxes ||= new Map()).set(id, box);
+    const st = this.addState();
+    // reopen after adding, and survive redraws (vault changes redraw the list while you type)
+    if (st.open === id || st.active === id) { st.open = null; this.inlineAdd(box, date, id); }
+  }
+  inlineAdd(box, date, id) {
+    activeDocument.querySelectorAll(".ot-task-add.is-inline").forEach((e) => e.remove());
+    if (this.addState().active && this.addState().active !== id) this.addState().draft = "";
+    box.querySelector(".ot-tasks-none")?.addClass("is-hidden");
+    const row = box.createDiv("ot-task-add is-inline");
+    setIcon(row.createSpan("ot-task-add-icon"), "plus");
+    const tnOn = this.plugin.settings.taskSource === "tasknotes" && this.plugin.taskNotes();
+    const when = date ? (date === moment().format("YYYY-MM-DD") ? "today" : moment(date, "YYYY-MM-DD").format("ddd, MMM D")) : null;
+    const input = row.createEl("input", { type: "text", attr: {
+      placeholder: when ? `New task for ${when}${tnOn ? " — “3pm #school”" : ""}` : `New task${tnOn ? " — “Call mom tomorrow #family”" : ""}`,
+      enterkeyhint: "done" } });
+    const st = this.addState();
+    st.active = id;
+    if (st.draft) input.value = st.draft;
+    input.oninput = () => { st.draft = input.value; };
+    window.setTimeout(() => { input.focus(); row.scrollIntoView?.({ block: "nearest" }); }, 0);
+    let busy = false;
+    const close = () => { st.active = null; st.draft = ""; row.remove(); box.querySelector(".ot-tasks-none")?.removeClass("is-hidden"); };
+    input.onkeydown = async (evt) => {
+      if (evt.key === "Escape") { evt.preventDefault(); close(); return; }
+      if (evt.key !== "Enter" || evt.isComposing || !input.value.trim()) return;
+      evt.preventDefault();
+      busy = true;
+      const text = input.value;
+      input.value = ""; st.draft = ""; input.disabled = true;
+      try {
+        await this.plugin.addTask(text, { date, tag: this.addTag || null, field: this.dateField });
+        st.open = id; // keep the input open for the next one
+      } catch (e) { new Notice(`Couldn't add the task: ${e.message || e}`); st.draft = text; }
+      window.setTimeout(() => this.render(), 400);
+    };
+    input.onblur = () => window.setTimeout(() => {
+      if (!row.isConnected) return; // redrawn: the new copy takes over
+      if (busy) return;
+      if (!input.value.trim()) close(); else st.active = null; // keep the draft, but don't reopen it by itself
+    }, 150);
+  }
+
+  check(parent, t) {
+    const c = parent.createDiv("ot-task-check" + (t.done ? " is-done" : ""));
+    if (t.statusColor && !t.done) c.style.setProperty("--ot-status", t.statusColor);
+    if (t.done) setIcon(c, "check");
+    c.setAttr("aria-label", t.done ? "Mark as not done" : "Mark as done");
+    c.onclick = async (evt) => {
+      evt.stopPropagation();
+      c.addClass("is-busy");
+      try { await this.plugin.toggleTask(t); } catch (e) { new Notice(`Couldn't update the task: ${e.message || e}`); }
+      window.setTimeout(() => this.render(), 350);
+    };
+    return c;
+  }
+
+  pill(parent, t) {
+    const el = parent.createDiv("ot-task-pill" + (t.done ? " is-done" : ""));
+    if (t.prioColor) el.style.setProperty("--ot-prio", t.prioColor);
+    this.check(el, t);
+    el.createSpan({ cls: "ot-task-pill-text", text: (t.time ? t.time + " " : "") + t.title });
+    this.bindTask(el, t);
+  }
+
+  taskRow(parent, t, opts = {}) {
+    const row = parent.createDiv("ot-task-row" + (t.done ? " is-done" : "") + (opts.compact ? " is-compact" : ""));
+    this.check(row, t);
+    const main = row.createDiv("ot-task-main");
+    main.createDiv({ cls: "ot-task-title", text: t.title });
+    const meta = main.createDiv("ot-task-meta");
+    const d = this.dateOf(t);
+    if (d && !opts.hideDate) {
+      const m = moment(d, "YYYY-MM-DD");
+      const overdue = !t.done && m.isBefore(moment(), "day");
+      const de = meta.createSpan("ot-task-date" + (overdue ? " is-overdue" : ""));
+      setIcon(de.createSpan("ot-task-mi"), this.dateKind(t) === "due" ? "calendar" : "calendar-clock");
+      de.setAttr("aria-label", this.dateKind(t) === "due" ? "Due" : "Scheduled");
+      de.createSpan({ text: m.isSame(moment(), "year") ? m.format("MMM D") : m.format("MMM D, YYYY") });
+    }
+    if (t.prioColor) {
+      const pf = meta.createSpan("ot-task-prio");
+      pf.style.setProperty("--ot-prio", t.prioColor);
+      setIcon(pf, "flag");
+      pf.setAttr("aria-label", `Priority: ${t.prioLabel || ""}`);
+    }
+    if (t.time) {
+      const te = meta.createSpan("ot-task-date");
+      setIcon(te.createSpan("ot-task-mi"), "clock");
+      te.createSpan({ text: t.time });
+    }
+    const notes = t.kind === "cb" ? [t.file] : t.notes;
+    for (const f of notes.slice(0, 2)) {
+      const ne = meta.createSpan("ot-task-note");
+      setIcon(ne.createSpan("ot-task-mi"), "file-text");
+      ne.createSpan({ text: f.basename });
+      ne.onclick = (evt) => { evt.stopPropagation(); this.app.workspace.getLeaf(Keymap.isModEvent(evt)).openFile(f); };
+    }
+    for (const tag of t.tags.slice(0, opts.compact ? 2 : 4)) meta.createSpan({ cls: "ot-task-tag", text: "#" + tag });
+    if (!meta.childElementCount) meta.remove();
+    this.bindTask(row, t);
+  }
+
+  bindTask(el, t) {
+    el.onclick = (evt) => this.plugin.openTask(t, Keymap.isModEvent(evt));
+    el.oncontextmenu = (evt) => {
+      evt.preventDefault();
+      const tn = this.plugin.taskNotes();
+      if (t.kind === "tn" && tn?.api?.buildTaskContextMenu) {
+        tn.api.buildTaskContextMenu({ taskPath: t.file.path, onUpdate: () => this.render() }).then((cm) => {
+          cm.menu.addSeparator();
+          cm.menu.addItem((i) => { i.setTitle("Delete task").setIcon("trash-2").onClick(() => this.confirmDelete(t)); i.setWarning?.(true); });
+          cm.show(evt);
+        }).catch(() => this.basicMenu(evt, t));
+      } else this.basicMenu(evt, t);
+    };
+  }
+  basicMenu(evt, t) {
+    const m = new Menu();
+    m.addItem((i) => i.setTitle(t.done ? "Mark as not done" : "Mark as done").setIcon("check").onClick(async () => { await this.plugin.toggleTask(t); this.render(); }));
+    m.addItem((i) => i.setTitle("Open note").setIcon("file-text").onClick(() => this.plugin.openTask(t)));
+    m.addItem((i) => i.setTitle("Open in new tab").setIcon("file-plus").onClick(() => this.plugin.openTask(t, "tab")));
+    m.addSeparator();
+    m.addItem((i) => { i.setTitle("Delete task").setIcon("trash-2").onClick(() => this.confirmDelete(t)); i.setWarning?.(true); });
+    m.showAtMouseEvent(evt);
+  }
+  confirmDelete(t) {
+    const what = t.kind === "tn" ? `The task note “${t.file.basename}” goes to the trash.` : `The line is removed from “${t.file.basename}”.`;
+    new ConfirmModal(this.plugin, `Delete “${t.title}”?`, what, "Delete", async () => {
+      try { await this.plugin.deleteTask(t); new Notice(`Deleted “${t.title}”.`); }
+      catch (e) { new Notice(`Couldn't delete: ${e.message || e}`); }
+      window.setTimeout(() => this.render(), 300);
+    }).open();
+  }
+
+  scopeMenu(evt) {
+    const p = this.plugin;
+    const m = new Menu();
+    const go = (k) => { this.scope = k; this.leaf.updateHeader?.(); this.app.workspace.requestSaveLayout?.(); this.render(); };
+    m.addItem((i) => i.setTitle("All tasks").setIcon("circle-check").setChecked(this.scope === "all").onClick(() => go("all")));
+    m.addSeparator();
+    for (const t of p.visibleTypes()) m.addItem((i) => i.setTitle(t.label).setIcon(p.iconFor(t.key)).setChecked(this.scope === t.key).onClick(() => go(t.key)));
+    m.showAtMouseEvent(evt);
+  }
+
+  optionsMenu(evt) {
+    const p = this.plugin, pr = this.prefs();
+    const m = new Menu();
+    m.addItem((i) => i.setTitle("Show completed").setIcon("check-check").setChecked(!!p.settings.taskShowDone).onClick(async () => {
+      p.settings.taskShowDone = !p.settings.taskShowDone;
+      if (p.settings.taskShowDone) this.collapsed.delete("done");
+      await p.saveSettings(false); this.render();
+    }));
+    m.addSeparator();
+    for (const [v, t, ic] of [["due", "By due date", "calendar"], ["scheduled", "By scheduled date", "calendar-clock"], ["any", "Due, else scheduled", "calendar-range"]])
+      m.addItem((i) => i.setTitle(t).setIcon(ic).setChecked((pr.dateField || "any") === v).onClick(() => this.setPref({ dateField: v })));
+    m.addSeparator();
+    m.addItem((i) => i.setTitle("Background image…").setIcon("image").onClick(() =>
+      new TaskBgModal(p, (img) => this.setPref({ bg: { ...(pr.bg?.color ? { color: pr.bg.color } : {}), image: img } })).open()));
+    m.addItem((i) => {
+      i.setTitle("Background color").setIcon("palette");
+      const sub = i.setSubmenu?.();
+      if (!sub) { i.onClick(() => this.setPref({ bg: { color: COLORS[6].hex } })); return; }
+      for (const c of COLORS) sub.addItem((s) => s.setTitle(c.name).setChecked(pr.bg?.color === c.hex && !pr.bg?.image).onClick(() => this.setPref({ bg: { color: c.hex } })));
+    });
+    if (pr.bg) m.addItem((i) => i.setTitle("Remove background").setIcon("x").onClick(() => this.setPref({ bg: null })));
+    if (p.settings.taskSource === "tasknotes" && p.taskNotes()) {
+      m.addSeparator();
+      m.addItem((i) => i.setTitle("Open TaskNotes calendar").setIcon("calendar-range").onClick(() => this.app.commands.executeCommandById("tasknotes:open-advanced-calendar-view")));
+    }
+    m.showAtMouseEvent(evt);
+  }
+}
+
 class HomeEmbed extends MarkdownRenderChild {
   constructor(el, plugin) { super(el); this.plugin = plugin; this.app = plugin.app; this.contentEl = el; }
   onload() {
@@ -2241,13 +3419,14 @@ class TypefoldView extends ItemView {
     if (!this.selected && this.plugin.settings.lastSelected) this.selected = this.plugin.settings.lastSelected;
     this.render();
   }
-  async onClose() { this.resizeObs?.disconnect(); }
+  async onClose() { this.resizeObs?.disconnect(); this._pvIO?.disconnect(); }
 
   select(key, opts = {}) {
+    if (key === "smart:tasks" && this.plugin.calendarMerged()) key = "smart:calendar";
     this.listLimit = 0;
     this.plugin.settings.lastSelected = key;
     this.plugin.saveData(this.plugin.settings);
-    if (key === "smart:calendar" && this.plugin.settings.listClosed) { this.selected = key; this.setListClosed(false); }
+    if ((key === "smart:calendar" || key === "smart:tasks") && this.plugin.settings.listClosed) { this.selected = key; this.setListClosed(false); }
     this.selected = key;
     this.query = "";
     this.app.workspace.requestSaveLayout();
@@ -2256,11 +3435,15 @@ class TypefoldView extends ItemView {
     if (fk) {
       const note = this.plugin.folderNoteOf(fk.path);
       if (note && !opts.noOpen) this.app.workspace.getLeaf(false).openFile(note);
-    } else if (key && !key.includes(":") && this.plugin.settings.openBaseOnClick && !opts.noOpen) this.plugin.openTypeBase(key);
+    } else if (key && !key.includes(":") && !opts.noOpen) {
+      if (this.plugin.typePagesAllowed(key)) this.plugin.openTypeBase(key);
+      else if (this.plugin.settings.listClosed) this.setListClosed(false); // no page: show its notes in the list instead
+    }
   }
 
   render() {
     const el = this.contentEl;
+    this._pvIO?.disconnect(); this._pvIO = null; // rows from the last draw are gone
     const navScroll = el.querySelector(".ot-nav-pane .ot-scroll")?.scrollTop || 0;
     const listScroll = el.querySelector(".ot-list-pane .ot-list")?.scrollTop || 0;
     el.empty();
@@ -2363,8 +3546,8 @@ class TypefoldView extends ItemView {
     if (p.settings.showSmart) {
       const s = scroll.createDiv("ot-section ot-smart");
       const shown = p.settings.smartItems || SMART.map((x) => x.key);
-      for (const sm of SMART.filter((x) => shown.includes(x.key))) {
-        const r = row(s, sm.key, sm.label, { icon: sm.icon, color: "#8E8E93", menu: (e) => {
+      for (const sm of SMART.filter((x) => shown.includes(x.key) && !(x.key === "smart:tasks" && p.calendarMerged()))) {
+        const r = row(s, sm.key, p.labelFor(sm.key), { icon: sm.icon, color: "#8E8E93", menu: (e) => {
           const m = new Menu();
           m.addItem((i) => i.setTitle(`Hide “${sm.label}”`).setIcon("eye-off").onClick(async () => {
             p.settings.smartItems = shown.filter((k) => k !== sm.key); await p.saveSettings(false); this.render();
@@ -2393,7 +3576,8 @@ class TypefoldView extends ItemView {
       }
     }
 
-    if (p.settings.showFavorites) this.renderFavorites(scroll.querySelector(".ot-smart") || scroll.createDiv("ot-section ot-smart"));
+    if (p.settings.showFavorites) this.renderFavorites(scroll);
+    if (p.settings.showRecents) this.renderRecents(scroll);
 
     const ts = section("Object Types");
     const titleEl = ts.querySelector(".ot-section-title");
@@ -2422,8 +3606,8 @@ class TypefoldView extends ItemView {
     addType.setAttr("aria-label", "New object type");
     addType.setAttr("role", "button");
     addType.onclick = () => new NewTypeModal(p).open();
-    const types = p.visibleTypes();
-    if (!types.length) ts.createDiv({ cls: "ot-empty", text: `No notes with a "${p.prop}" property yet.` });
+    const types = this.foldTitle(ts, "types") ? [] : p.visibleTypes();
+    if (!types.length && !p.settings.closedSections?.types) ts.createDiv({ cls: "ot-empty", text: `No notes with a "${p.prop}" property yet.` });
     for (const t of types) {
       const r = this.makeSortable(row(ts, t.key, t.label, { count: t.count }), t.key, types) || null;
       this.renderFolderTree(ts, t.key, p.typeRoot(t.key), 1, ts.lastElementChild);
@@ -2433,11 +3617,12 @@ class TypefoldView extends ItemView {
 
     if (p.settings.showFiles) {
       const fs = section("Files");
-      for (const t of p.visibleTypes({ files: true })) {
+      const filesClosed = this.foldTitle(fs, "files");
+      for (const t of filesClosed ? [] : p.visibleTypes({ files: true })) {
         const r = row(fs, t.key, t.label, { count: t.count });
         this.renderFolderTree(fs, t.key, p.typeRoot(t.key), 1, r);
       }
-      for (const fc of FILE_COLLECTIONS) {
+      for (const fc of filesClosed ? [] : FILE_COLLECTIONS) {
         const r = row(fs, fc.key, fc.label, { count: p.filesFor(fc.key).length });
         if (fc.key === "file:tags") this.renderTagTree(fs, null, 1, r);
       }
@@ -2467,27 +3652,87 @@ class TypefoldView extends ItemView {
     btn("command", "Command palette", () => this.app.commands.executeCommandById("command-palette:open"));
   }
 
+  /** make an existing section title fold its section; returns true when it's folded */
+  foldTitle(sec, id) {
+    const p = this.plugin;
+    const t = sec.querySelector(".ot-section-title");
+    const closed = !!p.settings.closedSections?.[id];
+    if (!t) return closed;
+    t.addClass("ot-fold-title");
+    const chev = createSpan("ot-fold-chev");
+    setIcon(chev, "chevron-right");
+    chev.toggleClass("is-open", !closed);
+    t.insertBefore(chev, t.childNodes[1] || null);
+    t.onclick = async (e) => {
+      if (e.target.closest(".ot-section-add")) return; // its own buttons
+      p.settings.closedSections ||= {};
+      p.settings.closedSections[id] = !closed;
+      await p.saveSettings(false);
+      this.render();
+    };
+    return closed;
+  }
+
+  /** a small section title like “Object Types” that folds its section open and closed */
+  foldSection(scroll, id, title) {
+    const p = this.plugin;
+    const closed = !!p.settings.closedSections?.[id];
+    const sec = scroll.createDiv("ot-section ot-fold-section");
+    const t = sec.createDiv("ot-section-title ot-fold-title");
+    t.createSpan({ text: title });
+    const chev = t.createSpan("ot-fold-chev");
+    setIcon(chev, "chevron-right");
+    chev.toggleClass("is-open", !closed);
+    t.setAttr("role", "button");
+    t.setAttr("aria-label", closed ? `Show ${title}` : `Hide ${title}`);
+    t.onclick = async () => {
+      p.settings.closedSections ||= {};
+      p.settings.closedSections[id] = !closed;
+      await p.saveSettings(false);
+      this.render();
+    };
+    return closed ? null : sec;
+  }
+
+  /** "Recents": files you opened lately, as compact rows */
+  renderRecents(scroll) {
+    const p = this.plugin;
+    const files = p.filesFor("smart:recent").slice(0, Math.max(1, p.settings.recentsCount || 7));
+    if (!files.length) return;
+    const sec = this.foldSection(scroll, "recents", "Recents");
+    if (!sec) return;
+    const active = this.app.workspace.getActiveFile()?.path;
+    for (const f of files) {
+      const r = sec.createDiv("ot-nav-row ot-folder-row ot-fav-row ot-file-row");
+      r.style.paddingLeft = "8px";
+      const ic = r.createSpan("ot-folder-icon");
+      const iz = p.iconizeInfo(f.path);
+      const own = p.settings.noteIcons?.[f.path];
+      if (!(iz && p.drawIconize(ic, iz))) {
+        if (own) paintIcon(ic, own.icon, own.color || NO_COLOR);
+        else setIcon(ic, f.extension === "md" ? "file-text" : f.extension === "canvas" ? "layout-dashboard" : f.extension === "base" ? "table" : f.extension === "pdf" ? "file-type" : "file");
+      }
+      r.createSpan({ cls: "ot-nav-label", text: f.basename });
+      if (f.path === active) r.addClass("is-active-note");
+      this.bindFile(r, f);
+      r.oncontextmenu = (evt) => this.noteMenu(evt, f, (m) => m.addItem((i) => {
+        i.setTitle("Remove from Recents").setIcon("x").onClick(async () => {
+          p.settings.recentFiles = (p.settings.recentFiles || []).filter((x) => x !== f.path);
+          await p.saveSettings(false); this.render();
+        });
+        i.setSection?.("action");
+      }));
+    }
+  }
+
   /** "Favorites": the core Bookmarks list, drawn like subfolder rows */
   renderFavorites(s) {
     const p = this.plugin;
     const bm = this.app.internalPlugins?.getPluginById?.("bookmarks");
     const items = bm?.enabled ? bm.instance?.items || [] : [];
     if (!items.length) return;
-    // a row like Home / Inbox / Calendar that opens and closes
-    const head = s.createDiv("ot-nav-row ot-fav-head");
-    paintIcon(head.createSpan(), "star", "#8E8E93");
-    head.createSpan({ cls: "ot-nav-label", text: "Favorites" });
-    if (p.settings.showCounts) head.createSpan({ cls: "ot-count", text: String(items.length) });
-    const open = !!p.settings.expanded["smart:favorites"];
-    const chev = head.createSpan("ot-chevron");
-    setIcon(chev, "chevron-right");
-    chev.toggleClass("is-open", open);
-    head.addClass("has-children");
-    head.onclick = async () => {
-      if (open) delete p.settings.expanded["smart:favorites"]; else p.settings.expanded["smart:favorites"] = true;
-      await p.saveSettings(false); this.render();
-    };
-    if (!open) return;
+    s = this.foldSection(s, "favorites", "Favorites");
+    if (!s) return;
     const active = this.app.workspace.getActiveFile()?.path;
     const title = (it) => { try { return bm.instance.getItemTitle(it); } catch (e) { return it.title || it.path || it.query || "Bookmark"; } };
     // right-click: remove the bookmark (and, for files, open it in a new tab)
@@ -2674,7 +3919,8 @@ class TypefoldView extends ItemView {
     ownerRow.addClass("has-children");
     chev.onclick = async (e) => {
       e.stopPropagation();
-      if (open) delete p.settings.expanded[nodeKey]; else p.settings.expanded[nodeKey] = true;
+      if (open) delete p.settings.expanded[nodeKey];
+      else { p.collapseOthers(typeKey, depth === 1 ? null : folder); p.settings.expanded[nodeKey] = true; }
       await p.saveSettings(false);
       this.render();
     };
@@ -2778,6 +4024,15 @@ class TypefoldView extends ItemView {
     }
     menu.addItem((i) => i.setTitle(p.isPinned("type", key) ? "Unpin" : "Pin").setIcon("pin").onClick(() => p.togglePin("type", key)));
     menu.addItem((i) => i.setTitle("Change icon & color…").setIcon("palette").onClick(() => new TypeConfigModal(p, key).open()));
+    if (isType) menu.addItem((i) => i.setTitle("Show tasks").setIcon("circle-check").onClick(() => p.openTasks(key)));
+    if (isType && p.settings.openBaseOnClick !== false) menu.addItem((i) => {
+      const off = !!p.settings.types[key]?.noPage;
+      i.setTitle(off ? "Use a type page" : "Don't use a type page").setIcon(off ? "file-plus" : "file-x").onClick(async () => {
+        if (off) delete p.conf(key).noPage; else p.conf(key).noPage = true;
+        await p.saveSettings(false);
+        new Notice(off ? `Clicking “${p.labelFor(key)}” opens its page again.` : `“${p.labelFor(key)}” won't create or open a page; its notes show in the sidebar list.`);
+      });
+    });
     if (isType) {
       menu.addSeparator();
       menu.addItem((i) => i.setTitle("Archive").setIcon("archive").onClick(async () => {
@@ -2888,6 +4143,285 @@ class TypefoldView extends ItemView {
     return null;
   }
 
+  /** Tasks in the sidebar: editable views (Today / Week / Month / List) with their own name, icon and filters */
+  taskPanelViews() {
+    const s = this.plugin.settings;
+    if (!Array.isArray(s.taskPanelViews) || !s.taskPanelViews.length) s.taskPanelViews = DEFAULT_TASK_VIEWS.map((v) => ({ ...v, filter: { ...v.filter } }));
+    return s.taskPanelViews;
+  }
+  currentTaskView() {
+    const views = this.taskPanelViews();
+    return views.find((v) => v.id === this.plugin.settings.taskPanelView) || views[0];
+  }
+  renderTaskPane(pane, withBack) {
+    const p = this.plugin;
+    const views = this.taskPanelViews();
+    const view = this.currentTaskView();
+    const f = Object.assign({ scope: "all", tags: [], status: "open", date: "any" }, view.filter || {});
+
+    const header = pane.createDiv("ot-list-header");
+    if (withBack) {
+      const back = header.createDiv("clickable-icon ot-back");
+      setIcon(back, "chevron-left");
+      back.onclick = () => this.select(null);
+    }
+    const merged = p.calendarMerged();
+    paintIcon(header.createSpan("ot-list-icon"), merged ? "calendar" : "circle-check", "#8E8E93");
+    header.createSpan({ cls: "ot-list-title", text: merged ? "Calendar" : "Tasks" });
+    const countEl = header.createSpan({ cls: "ot-list-count", text: "" });
+    header.createDiv("ot-spacer");
+    if (!withBack) {
+      const close = header.createDiv("clickable-icon ot-list-close");
+      setIcon(close, "panel-right-close");
+      close.setAttr("aria-label", "Hide note list");
+      close.onclick = () => this.setListClosed(true);
+    }
+
+    this.taskTabsBar(pane, view, f);
+    if (merged && !p.settings.calendarTipSeen) {
+      const tip = pane.createDiv("ot-hint ot-cal-tip");
+      setIcon(tip.createSpan("ot-hint-icon"), "sparkles");
+      tip.createDiv({ cls: "ot-hint-text", text: "Your tasks live here now: Today, Week, Month and All, next to Daily notes. Right-click a tab to edit it; double-click a day to add a task." });
+      const ok = tip.createEl("button", { text: "Got it" });
+      ok.onclick = async () => { p.settings.calendarTipSeen = true; await p.saveSettings(false); tip.remove(); };
+    }
+
+    const body = pane.createDiv("ot-list ot-task-pane");
+    const tv = Object.create(TasksView.prototype);
+    Object.assign(tv, { plugin: p, app: this.app, scope: f.scope, collapsed: (this.taskCollapsed ||= new Set(["done"])), render: () => this.render(),
+      _addState: (this.taskAddState ||= {}), addBoxes: new Map(), dateField: view.dateField || "any",
+      addTag: f.tags?.[0] || (f.scope !== "all" && !/\s/.test(p.labelFor(f.scope)) ? p.labelFor(f.scope) : null) });
+    const seq = (this._taskSeq = (this._taskSeq || 0) + 1);
+    p.collectTasks().then((all) => {
+      if (seq !== this._taskSeq || !body.isConnected) return;
+      const today = moment().format("YYYY-MM-DD");
+      const tags = (f.tags || []).map((t) => String(t).replace(/^#/, "").toLowerCase()).filter(Boolean);
+      const tasks = all.filter((t) => {
+        if (!p.taskInType(t, f.scope)) return false;
+        if (f.status === "open" && t.done) return false;
+        if (f.status === "done" && !t.done) return false;
+        if (tags.length && !t.tags.some((x) => tags.includes(String(x).toLowerCase()))) return false;
+        const d = tv.dateOf(t);
+        if (f.date === "dated" && !d) return false;
+        if (f.date === "undated" && d) return false;
+        if (f.date === "overdue" && !(d && d < today && !t.done)) return false;
+        return true;
+      });
+      countEl.setText(String(tasks.filter((t) => !t.done).length));
+      const layout = view.layout || "list";
+      if (layout === "today") this.paneToday(body, tv, tasks);
+      else if (layout === "week") this.paneWeek(body, tv, tasks);
+      else if (layout === "month") this.paneMonth(body, tv, tasks);
+      else {
+        // List shows completed tasks only if the view's filter asks for them
+        const keep = p.settings.taskShowDone;
+        p.settings.taskShowDone = f.status !== "open";
+        tv.renderList(body, tasks);
+        p.settings.taskShowDone = keep;
+        if (!tasks.length) body.createDiv({ cls: "ot-empty", text: this.noTasksText() });
+      }
+      body.ondblclick = (evt) => {
+        if (evt.target !== body && !evt.target.closest(".ot-empty")) return;
+        const first = { today: "p-today", month: "p-sel", list: "today" }[layout];
+        if (first) tv.startAdd(first, layout === "month" ? (this.taskCursor || moment()).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"));
+      };
+      if (this._taskScroll && this._taskScrollView === view.id) body.scrollTop = this._taskScroll;
+      body.onscroll = () => { this._taskScroll = body.scrollTop; this._taskScrollView = view.id; };
+    });
+  }
+  /** the view tabs (and, when Calendar and Tasks are one, a Daily notes tab first) */
+  taskTabsBar(pane, view, f) {
+    const p = this.plugin;
+    const views = this.taskPanelViews();
+    const daily = p.calendarMerged() && (p.settings.taskPanelView === "daily" || p.hasDailyNotes());
+    const isDaily = !view;
+    const bar = pane.createDiv("ot-task-tools");
+    const tabs = bar.createDiv("ot-task-tabs");
+    if (daily) {
+      const t = tabs.createDiv({ cls: "ot-task-tab" + (isDaily ? " is-active" : "") });
+      setIcon(t.createSpan("ot-task-tab-icon"), "notebook");
+      t.createSpan({ cls: "ot-task-tab-name", text: "Daily notes" });
+      t.onclick = async () => { p.settings.taskPanelView = "daily"; await p.saveSettings(false); this.render(); };
+    }
+    for (const v of views) {
+      const t = tabs.createDiv({ cls: "ot-task-tab" + (!isDaily && v.id === view.id ? " is-active" : "") });
+      setIcon(t.createSpan("ot-task-tab-icon"), v.icon || "list-checks");
+      t.createSpan({ cls: "ot-task-tab-name", text: v.name });
+      t.onclick = async () => { p.settings.taskPanelView = v.id; this.taskCursor = null; await p.saveSettings(false); this.render(); };
+      t.oncontextmenu = (evt) => this.taskViewMenu(evt, v);
+    }
+    const add = tabs.createDiv("clickable-icon ot-task-tab-add");
+    setIcon(add, "plus");
+    add.setAttr("aria-label", "New view");
+    add.onclick = () => {
+      const v = { id: "v" + Date.now().toString(36), name: "New view", icon: "list-checks", layout: "list", filter: { scope: "all", tags: [], status: "open", date: "any" } };
+      new TaskViewModal(p, v, async (saved) => { views.push(saved); p.settings.taskPanelView = saved.id; await p.saveSettings(false); this.render(); }).open();
+    };
+    const acts = bar.createDiv("ot-task-acts");
+    const btn = (icon, tip, fn) => {
+      const b = acts.createDiv("clickable-icon ot-head-btn");
+      setIcon(b, icon);
+      b.setAttr("aria-label", tip);
+      b.onclick = fn;
+      return b;
+    };
+    if (isDaily) return bar;
+    if (p.settings.taskSource === "tasknotes" && p.taskNotes()) btn("plus-circle", "New task", () => this.app.commands.executeCommandById("tasknotes:create-new-task"));
+    btn("sliders-horizontal", "Edit this view", (evt) => this.taskViewMenu(evt, view));
+    btn("maximize-2", "Open full view", () => {
+      const mode = { today: "day", week: "week", month: "month", list: "list" }[view.layout] || "list";
+      const pr = p.taskPrefs(f.scope); pr.mode = mode; pr.dateField = view.dateField || "any";
+      p.saveSettings(false).then(() => p.openTasks(f.scope));
+    });
+
+    return bar;
+  }
+
+  /** a small link to the daily note of a date (creates it on click when missing) */
+  dailyChip(parent, m) {
+    const p = this.plugin;
+    const file = this.app.vault.getAbstractFileByPath(p.dailyPath(m));
+    const c = parent.createDiv("ot-daily-chip" + (file ? " has-note" : ""));
+    setIcon(c.createSpan("ot-task-mi"), file ? "notebook" : "notebook-pen");
+    c.createSpan({ text: file ? "Daily note" : "Create daily note" });
+    c.setAttr("aria-label", m.format("dddd, LL"));
+    c.onclick = (evt) => { evt.stopPropagation(); p.openDaily(m.clone(), evt); };
+    return c;
+  }
+
+  noTasksText() {
+    const p = this.plugin;
+    const src = p.settings.taskSource;
+    if (src === "tasknotes" && !p.taskNotes()) return "Task source is TaskNotes, but the TaskNotes plugin isn't enabled.";
+    return "No tasks.";
+  }
+  paneToday(body, tv, tasks) {
+    const today = moment();
+    const key = today.format("YYYY-MM-DD");
+    const head = body.createDiv("ot-pane-day-head");
+    head.createDiv({ cls: "ot-pane-day-big", text: today.format("D") });
+    const hd = head.createDiv();
+    hd.createDiv({ cls: "ot-pane-day-dow", text: today.format("dddd") });
+    hd.createDiv({ cls: "ot-pane-day-month", text: today.format("MMMM YYYY") });
+    head.createDiv("ot-spacer");
+    this.dailyChip(head, today);
+    const overdue = tasks.filter((t) => !t.done && tv.dateOf(t) && tv.dateOf(t) < key)
+      .sort((a, b) => String(tv.dateOf(a)).localeCompare(String(tv.dateOf(b))));
+    if (overdue.length) tv.group(body, "p-overdue", "Overdue", overdue, { warn: true });
+    tv.group(body, "p-today", "Today", tv.byDay(tasks).get(key) || [], { hideDate: true, always: true, addDate: key });
+  }
+  paneWeek(body, tv, tasks) {
+    const base = this.taskCursor || moment().startOf("day");
+    const start = tv.weekStart(base);
+    const nav = body.createDiv("ot-pane-nav");
+    const prev = nav.createDiv("clickable-icon"); setIcon(prev, "chevron-left");
+    nav.createDiv({ cls: "ot-pane-nav-label", text: `${start.format("MMM D")} – ${start.clone().add(6, "day").format(start.clone().add(6, "day").isSame(start, "month") ? "D" : "MMM D")}` });
+    const next = nav.createDiv("clickable-icon"); setIcon(next, "chevron-right");
+    const go = (n) => { this.taskCursor = start.clone().add(n, "week"); this.render(); };
+    prev.onclick = () => go(-1); next.onclick = () => go(1);
+    if (!start.isSame(tv.weekStart(moment()), "day")) {
+      const t = nav.createDiv({ cls: "ot-pane-today-btn", text: "Today" });
+      t.onclick = () => { this.taskCursor = null; this.render(); };
+    }
+    const days = tv.byDay(tasks);
+    const todayKey = moment().format("YYYY-MM-DD");
+    for (let i = 0; i < 7; i++) {
+      const d = start.clone().add(i, "day"), key = d.format("YYYY-MM-DD");
+      const list = days.get(key) || [];
+      const sec = body.createDiv("ot-pane-wday" + (key === todayKey ? " is-today" : "") + (list.length ? "" : " is-empty"));
+      const h = sec.createDiv("ot-pane-wday-head");
+      h.createSpan({ cls: "ot-pane-wday-num", text: d.format("D") });
+      h.createSpan({ cls: "ot-pane-wday-dow", text: key === todayKey ? "Today" : d.format("dddd") });
+      if (list.length) h.createSpan({ cls: "ot-tasks-group-n", text: String(list.length) });
+      const dn = this.app.vault.getAbstractFileByPath(this.plugin.dailyPath(d));
+      const di = h.createSpan("clickable-icon ot-pane-wday-note" + (dn ? " has-note" : ""));
+      setIcon(di, dn ? "notebook" : "notebook-pen");
+      di.setAttr("aria-label", dn ? "Open daily note" : "Create daily note");
+      di.onclick = (evt) => { evt.stopPropagation(); this.plugin.openDaily(d.clone(), evt); };
+      const plus = h.createSpan("clickable-icon ot-tasks-group-add");
+      setIcon(plus, "plus");
+      plus.setAttr("aria-label", "Add a task on this day");
+      plus.onclick = (evt) => { evt.stopPropagation(); tv.startAdd("wd-" + key, key); };
+      const box = sec.createDiv("ot-tasks-list");
+      for (const t of list) tv.taskRow(box, t, { hideDate: true });
+      tv.addSlot("wd-" + key, box, key);
+      sec.ondblclick = (evt) => { if (!evt.target.closest(".ot-task-row, .ot-task-add")) tv.startAdd("wd-" + key, key); };
+    }
+  }
+  paneMonth(body, tv, tasks) {
+    const sel = this.taskCursor || moment().startOf("day");
+    const first = sel.clone().startOf("month");
+    const nav = body.createDiv("ot-pane-nav");
+    const prev = nav.createDiv("clickable-icon"); setIcon(prev, "chevron-left");
+    nav.createDiv({ cls: "ot-pane-nav-label", text: first.format("MMMM YYYY") });
+    const next = nav.createDiv("clickable-icon"); setIcon(next, "chevron-right");
+    const go = (n) => { this.taskCursor = first.clone().add(n, "month"); this.render(); };
+    prev.onclick = () => go(-1); next.onclick = () => go(1);
+    if (!sel.isSame(moment(), "day")) {
+      const t = nav.createDiv({ cls: "ot-pane-today-btn", text: "Today" });
+      t.onclick = () => { this.taskCursor = null; this.render(); };
+    }
+    const days = tv.byDay(tasks);
+    const start = tv.weekStart(first);
+    const weeks = Math.ceil((first.diff(start, "days") + first.daysInMonth()) / 7);
+    const cal = body.createDiv("ot-mini-cal");
+    for (let i = 0; i < 7; i++) cal.createDiv({ cls: "ot-mini-dow", text: start.clone().add(i, "day").format("dd").slice(0, 2) });
+    const todayKey = moment().format("YYYY-MM-DD"), selKey = sel.format("YYYY-MM-DD");
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = start.clone().add(i, "day"), key = d.format("YYYY-MM-DD");
+      const c = cal.createDiv("ot-mini-day");
+      if (!d.isSame(first, "month")) c.addClass("is-other");
+      if (key === todayKey) c.addClass("is-today");
+      if (key === selKey) c.addClass("is-selected");
+      if (this.app.vault.getAbstractFileByPath(this.plugin.dailyPath(d))) c.addClass("has-note");
+      c.createDiv({ cls: "ot-mini-num", text: String(d.date()) });
+      const list = days.get(key) || [];
+      const open = list.filter((t) => !t.done).length;
+      const dots = c.createDiv("ot-mini-dots");
+      for (let k = 0; k < Math.min(list.length, 3); k++) dots.createSpan({ cls: "ot-mini-dot" + (k >= open ? " is-done" : "") + (key < todayKey && k < open ? " is-late" : "") });
+      if (list.length) c.setAttr("aria-label", `${list.length} task${list.length > 1 ? "s" : ""}`);
+      // the first click redraws the calendar, so a second click on the same day within 450 ms counts as a double-click
+      c.onclick = () => {
+        const last = this._dayClick;
+        this._dayClick = { key, t: Date.now() };
+        if (last && last.key === key && Date.now() - last.t < 450) tv.addState().open = "p-sel";
+        this.taskCursor = d.clone();
+        this.render();
+      };
+    }
+    const list = days.get(selKey) || [];
+    this.dailyChip(body.createDiv("ot-pane-sel-note"), sel);
+    tv.group(body, "p-sel", selKey === todayKey ? "Today" : sel.format("dddd, MMM D"), list, { hideDate: true, always: true, addDate: selKey });
+  }
+  taskViewMenu(evt, v) {
+    const p = this.plugin, views = this.taskPanelViews();
+    const m = new Menu();
+    for (const [val, t, ic] of [["due", "By due date", "calendar"], ["scheduled", "By scheduled date", "calendar-clock"], ["any", "Due, else scheduled", "calendar-range"]])
+      m.addItem((i) => i.setTitle(t).setIcon(ic).setChecked((v.dateField || "any") === val).onClick(async () => { v.dateField = val; await p.saveSettings(false); this.render(); }));
+    m.addSeparator();
+    m.addItem((i) => i.setTitle("Edit view…").setIcon("pencil").onClick(() =>
+      new TaskViewModal(p, v, async (saved) => { Object.assign(v, saved); await p.saveSettings(false); this.render(); }).open()));
+    m.addItem((i) => i.setTitle("Duplicate").setIcon("copy").onClick(async () => {
+      const c = { ...v, id: "v" + Date.now().toString(36), name: v.name + " copy", filter: { ...(v.filter || {}) } };
+      views.splice(views.indexOf(v) + 1, 0, c); p.settings.taskPanelView = c.id; await p.saveSettings(false); this.render();
+    }));
+    const idx = views.indexOf(v);
+    if (idx > 0) m.addItem((i) => i.setTitle("Move left").setIcon("arrow-left").onClick(async () => { views.splice(idx, 1); views.splice(idx - 1, 0, v); await p.saveSettings(false); this.render(); }));
+    if (idx < views.length - 1) m.addItem((i) => i.setTitle("Move right").setIcon("arrow-right").onClick(async () => { views.splice(idx, 1); views.splice(idx + 1, 0, v); await p.saveSettings(false); this.render(); }));
+    if (views.length > 1) {
+      m.addSeparator();
+      m.addItem((i) => { i.setTitle("Delete view").setIcon("trash-2").onClick(async () => {
+        views.splice(views.indexOf(v), 1); if (p.settings.taskPanelView === v.id) p.settings.taskPanelView = views[0].id;
+        await p.saveSettings(false); this.render();
+      }); i.setWarning?.(true); });
+    }
+    m.addSeparator();
+    m.addItem((i) => i.setTitle("Reset to default views").setIcon("rotate-ccw").onClick(async () => {
+      p.settings.taskPanelViews = null; p.settings.taskPanelView = "today"; await p.saveSettings(false); this.render();
+    }));
+    m.showAtMouseEvent(evt);
+  }
+
   renderList(pane, withBack = false) {
     const p = this.plugin;
     const key = this.selected;
@@ -2899,10 +4433,13 @@ class TypefoldView extends ItemView {
       pane.createDiv({ cls: "ot-empty ot-list-empty", text: "Select an object type" });
       return;
     }
+    if (key === "smart:tasks") return this.renderTaskPane(pane, withBack);
+    if (key === "smart:calendar" && p.calendarMerged() && p.settings.taskPanelView !== "daily") return this.renderTaskPane(pane, withBack);
     const fk = p.parseFolderKey(key);
     const isType = !key.includes(":") || !!fk;
     const isCal = key === "smart:calendar";
-    const files = isCal
+    const isRecent = key === "smart:recent";
+    const files = isRecent ? p.filesFor(key) : isCal
       ? p.filesFor(key).map((f) => [f, p.dailyDate(f).valueOf()]).sort((a, b) => b[1] - a[1]).map((x) => x[0])
       : this.sortedFiles(key);
     const label = p.labelFor(key);
@@ -2935,6 +4472,7 @@ class TypefoldView extends ItemView {
       close.onclick = () => this.setListClosed(true);
     }
     header.createDiv("ot-spacer");
+    if (isCal && p.calendarMerged()) this.taskTabsBar(pane, null, null);
 
     const tools = createDiv("ot-list-tools");
     const hbtn = (icon, tip, fn) => {
@@ -2944,8 +4482,8 @@ class TypefoldView extends ItemView {
       b.onclick = fn;
       return b;
     };
-    const pr = isCal ? { ...this.listPrefs(key), group: "none" } : this.listPrefs(key);
-    if (!isCal) hbtn("arrow-up-down", "Sort", (evt) => {
+    const pr = isCal || isRecent ? { ...this.listPrefs(key), group: "none" } : this.listPrefs(key);
+    if (!isCal && !isRecent) hbtn("arrow-up-down", "Sort", (evt) => {
       const m = new Menu();
       m.addItem((i) => i.setTitle("Sort by").setIsLabel?.(true) ?? i.setTitle("Sort by").setDisabled(true));
       for (const [v, t, ic] of [["title", "Title", "type"], ["created", "Created time", "calendar-plus"], ["edited", "Last edited time", "pencil"]]) {
@@ -2956,7 +4494,7 @@ class TypefoldView extends ItemView {
       m.addItem((i) => i.setTitle("Descending").setIcon("arrow-down").setChecked(pr.dir === "desc").onClick(() => this.setListPref(key, { dir: "desc" })));
       m.showAtMouseEvent(evt);
     });
-    const gb = isCal ? null : hbtn("layers", "Group by", (evt) => {
+    const gb = isCal || isRecent ? null : hbtn("layers", "Group by", (evt) => {
       const m = new Menu();
       m.addItem((i) => i.setTitle("Group by").setIsLabel?.(true) ?? i.setTitle("Group by").setDisabled(true));
       m.addItem((i) => i.setTitle("No group").setIcon("list").setChecked(pr.group === "none").onClick(() => this.setListPref(key, { group: "none" })));
@@ -3011,7 +4549,7 @@ class TypefoldView extends ItemView {
       const visible = files.filter((f) => !q || f.basename.toLowerCase().includes(q));
       const metaTs = (f) => this.sortTime(f, pr.sort === "created" ? "created" : "edited");
       // render in chunks: big types used to build every row up front
-      const limit = this.listLimit || 150;
+      const limit = this.listLimit || 60;
       let shown = 0, hidden = 0;
       const put = (parent, f) => {
         if (shown >= limit) { hidden++; return; }
@@ -3022,8 +4560,8 @@ class TypefoldView extends ItemView {
       const finish = () => {
         if (!hidden) return;
         const more = listEl.createDiv("ot-show-more");
-        more.setText(`Show ${Math.min(hidden, 150)} more · ${hidden} left`);
-        more.onclick = () => { this.listLimit = limit + 150; draw(); };
+        more.setText(`Show ${Math.min(hidden, 100)} more · ${hidden} left`);
+        more.onclick = () => { this.listLimit = limit + 100; draw(); };
         const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) { io.disconnect(); more.click(); } }, { root: listEl, rootMargin: "300px" });
         io.observe(more);
       };
@@ -3174,7 +4712,17 @@ class TypefoldView extends ItemView {
     if (disp.preview > 0 && file.extension === "md") {
       const pv = text.createDiv("ot-item-preview");
       pv.style.setProperty("--ot-lines", "2");
-      this.previewText(file).then((t) => { if (t) pv.setText(t); else pv.remove(); });
+      // read the note only when its row is (about to be) on screen
+      this._pvIO ||= new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          this._pvIO?.unobserve(e.target);
+          const f = e.target._otFile;
+          if (f) this.previewText(f).then((t) => { if (t) e.target.setText(t); else e.target.remove(); });
+        }
+      }, { rootMargin: "250px" });
+      pv._otFile = file;
+      this._pvIO.observe(pv);
     }
     const meta = text.createDiv("ot-item-meta");
     meta.createSpan({ text: typeof ts === "string" ? ts : relTime(ts) });
@@ -3270,19 +4818,280 @@ class BannerPickerModal extends SuggestModal {
     q = q.trim();
     if (/^https?:\/\//.test(q)) return [{ url: q }];
     const ql = q.toLowerCase();
-    return this.images.filter((f) => !ql || f.path.toLowerCase().includes(ql)).slice(0, 60).map((f) => ({ file: f }));
+    const out = this.images.filter((f) => !ql || f.path.toLowerCase().includes(ql)).slice(0, 60).map((f) => ({ file: f }));
+    // borrow a banner from a folder above or from an object type
+    if (this.file && !this.plugin.isFolderNote?.(this.file)) {
+      const srcs = this.plugin.bannerSources(this.file)
+        .filter((x) => !ql || "default banner same as".includes(ql) || x.label.toLowerCase().includes(ql));
+      out.unshift(...srcs.map((x) => ({ borrow: x })));
+    }
+    return out;
   }
   renderSuggestion(item, el) {
     el.addClass("ot-banner-option");
+    if (item.borrow) {
+      const x = item.borrow;
+      if (x.src) el.createEl("img", { cls: "ot-banner-option-img", attr: { src: x.src } });
+      else {
+        const sw = el.createDiv("ot-banner-option-img ot-banner-option-gen");
+        sw.style.setProperty("--ot-color", x.banner.color);
+        setIcon(sw, x.banner.icon);
+      }
+      const t = el.createDiv("ot-banner-option-text");
+      const cur = this.plugin.defaultBannerSource(this.file);
+      t.createDiv({ text: `Same as ${x.label}` + (cur && cur.id === x.id ? "  ✓" : "") });
+      t.createDiv({ cls: "ot-banner-option-path", text: x.kind });
+      return;
+    }
     const src = item.url || this.app.vault.getResourcePath(item.file);
     el.createEl("img", { cls: "ot-banner-option-img", attr: { src, loading: "lazy" } });
     const t = el.createDiv("ot-banner-option-text");
     t.createDiv({ text: item.url ? "Use image URL" : item.file.basename });
     t.createDiv({ cls: "ot-banner-option-path", text: item.url || item.file.parent?.path || "/" });
   }
-  onChooseSuggestion(item) {
+  async onChooseSuggestion(item) {
+    if (item.borrow) {
+      if (this.plugin.bannerKey(this.file)) await this.plugin.setBanner(this.file, null);
+      await this.plugin.setDefaultBanner(this.file, item.borrow.id);
+      return;
+    }
     this.plugin.setBanner(this.file, item.url || `[[${item.file.path}]]`);
   }
+}
+
+/** the banner picker, reused to pick a Tasks background */
+class TaskBgModal extends BannerPickerModal {
+  constructor(plugin, onPick) { super(plugin, null); this.onPick = onPick; this.setPlaceholder("Pick a background image, or paste an image URL"); }
+  onChooseSuggestion(item) { this.onPick(item.url || item.file.path); }
+}
+
+class ConfirmModal extends Modal {
+  constructor(plugin, title, text, cta, onOk) { super(plugin.app); Object.assign(this, { title, text, cta, onOk }); }
+  onOpen() {
+    this.modalEl.addClass("ot-modal");
+    this.titleEl.setText(this.title);
+    this.contentEl.createEl("p", { text: this.text });
+    const b = this.contentEl.createDiv("ot-config-buttons");
+    b.createDiv("ot-spacer");
+    b.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const ok = b.createEl("button", { cls: "mod-warning", text: this.cta });
+    ok.onclick = () => { this.close(); this.onOk(); };
+    window.setTimeout(() => ok.focus(), 0);
+  }
+  onClose() { this.contentEl.empty(); }
+}
+
+/* ───────────── What's new + guide (opens once after an update) ───────────── */
+const WHATS_NEW = {
+  version: "1.1.0",
+  items: [
+    ["calendar", "Tasks now live in Calendar", "Open Calendar in the sidebar: your tasks now sit in tabs next to Daily notes — Today, Week (a section per day), Month (a calendar with dots for due tasks) and All. Each day links to its daily note. Prefer them apart? Settings → Sidebar → “Calendar and Tasks as separate rows”. Task views are yours to edit: Rename a view, change its icon, filter it by object type, tags, status or date, and choose whether tasks sit on their due or scheduled date."],
+    ["sparkles", "Start here", "Don't know where to start? The Start here tab turns several folders into object types at once and lets you pick what Typefold shows. It's always in Settings → General."],
+    ["mouse-pointer-click", "Add and delete tasks in place", "Double-click a day or a section to add a task right there, with that date. Right-click a task to delete it. ⤢ opens a full view with Month, Week, Day and List, and a background of your choice."],
+    ["list-checks", "TaskNotes, Tasks plugin or checkboxes", "Pick where tasks come from in Settings → Tasks: TaskNotes (one note per task, added in natural language like “Call mom tomorrow 3pm #family”), the Tasks plugin (its global filter, done dates and recurrence), or every `- [ ]` checkbox in your notes with the note title, tags and due date."],
+    ["inbox", "Inbox and Recents", "Inbox now holds every document outside your object types — PDFs, Office files and canvases too, not just notes. A new Recents section lists the files you opened most recently; Favorites, Recents, Object Types and Files are all foldable sections."],
+    ["house", "Your own Home", "Home can open Typefold's dashboard or any note you choose. Each dashboard section can be turned off."],
+    ["image", "Banners", "Borrow a banner from a folder above the note or from its object type. Fill, Fit, or drag to reposition. Image banners now always fill their box at the same height as type pages."],
+    ["folder-open", "Folder notes", "Boards inside folder notes now work right away (a missing Folder.base is created for you). A new switch stops Typefold from creating folder notes automatically."],
+    ["sliders-horizontal", "Settings in tabs, many more switches", "Settings are split into General, Sidebar, Notes, Home, Tasks, Types and More, with on/off switches for the ribbon buttons, status bar, chips under the title, note icons, sidebar footer, each shortcut and each Home section — plus a new “One folder open at a time” option (off by default)."],
+  ],
+};
+const GUIDE = [
+  ["folder-tree", "Folders are types", "Register a folder as an object type with “New → New type” or by right-clicking a folder. Every note inside it, subfolders included, belongs to that type — no tags or frontmatter needed. Nested folders can be types too."],
+  ["panel-left", "The sidebar", "Shortcuts (Home, Inbox, Calendar) at the top, then small foldable Favorites and Recents sections, your types with their folder trees, and Files. Click a type or folder to list its notes in the second column; right-click anything for more options; drag types to reorder them."],
+  ["layout-dashboard", "Type pages and folder boards", "Clicking a type opens its page: a Bases view of all its notes. Folder notes show a board of the notes in that folder. With Extended Base installed you also get Board, List and Feed views."],
+  ["file-text", "Notes", "Object notes get a banner and an icon above the title and chips below it (type, folder, properties, icon and banner buttons). Properties are hidden until you click the properties chip. Related notes, grouped by type, appear at the bottom."],
+  ["calendar", "Calendar and tasks", "Calendar in the sidebar holds your daily notes and your tasks. Switch views with the tabs, right-click a tab to edit it, double-click a day to add a task, right-click a task for more. ⤢ opens the big Month / Week / Day / List view."],
+  ["search", "Home and search", "Home shows a greeting, your types and recent notes — or a note you choose. ⌘T (a new tab) opens a search panel with recent pages and a preview."],
+  ["toggle-right", "Too much? Turn things off", "Typefold does a lot, and you don't need all of it. In Settings → Typefold you can switch off almost any part: the shortcuts, Favorites, Recents, the sidebar footer, banners, chips under the title, related notes, Home sections, ribbon buttons, the status bar, automatic folder notes… “One folder open at a time” keeps a long tree tidy. This guide stays under Settings → General."],
+];
+class WhatsNewModal extends Modal {
+  constructor(plugin, mode = "new") { super(plugin.app); this.plugin = plugin; this.mode = mode; }
+  onOpen() {
+    const p = this.plugin;
+    this.modalEl.addClass("ot-modal", "ot-whatsnew");
+    this.titleEl.empty();
+    const t = this.titleEl.createDiv("ot-whatsnew-title");
+    paintIcon(t.createSpan(), "shapes", "#007AFF");
+    t.createSpan({ text: `Typefold ${p.manifest.version}` });
+    const calm = this.contentEl.createDiv("ot-whatsnew-calm");
+    setIcon(calm.createSpan("ot-whatsnew-calm-icon"), "toggle-right");
+    calm.createSpan({ text: "Feels like too much? Almost everything can be turned off — sidebar sections, banners, chips, Home sections, ribbon and status bar — in Settings → Typefold." });
+    const tabs = this.contentEl.createDiv("ot-tasks-seg ot-whatsnew-tabs");
+    const body = this.contentEl.createDiv("ot-whatsnew-body");
+    const draw = () => {
+      tabs.empty(); body.empty();
+      for (const [m, label] of [["start", "Start here"], ["new", "What's new"], ["guide", "How it works"]]) {
+        const b = tabs.createDiv({ cls: "ot-tasks-seg-btn" + (this.mode === m ? " is-active" : ""), text: label });
+        b.onclick = () => { this.mode = m; draw(); };
+      }
+      if (this.mode === "start") { this.drawStart(body); body.scrollTop = 0; return; }
+      const list = this.mode === "new" ? WHATS_NEW.items : GUIDE;
+      for (const [icon, title, text] of list) {
+        const row = body.createDiv("ot-whatsnew-item");
+        paintIcon(row.createSpan(), icon, "#8E8E93");
+        const tx = row.createDiv();
+        tx.createDiv({ cls: "ot-whatsnew-item-title", text: title });
+        tx.createDiv({ cls: "ot-whatsnew-item-text", text });
+      }
+      body.scrollTop = 0;
+    };
+    draw();
+    // Obsidian moves focus once the modal is shown, which can scroll the list: start at the top
+    for (const ms of [0, 60, 250]) window.setTimeout(() => { body.scrollTop = 0; }, ms);
+    const foot = this.contentEl.createDiv("ot-config-buttons ot-whatsnew-foot");
+    const lab = foot.createEl("label", { cls: "ot-check" });
+    const cb = lab.createEl("input", { type: "checkbox" });
+    cb.checked = !!p.settings.showWhatsNew;
+    cb.onchange = async () => { p.settings.showWhatsNew = cb.checked; await p.saveData(p.settings); };
+    lab.createSpan({ text: "Show after updates" });
+    foot.createDiv("ot-spacer");
+    const settings = foot.createEl("button", { text: "Open settings" });
+    settings.onclick = () => { this.close(); try { this.app.setting.open(); this.app.setting.openTabById(p.manifest.id); } catch (e) {} };
+    foot.createEl("button", { cls: "mod-cta", text: "Got it" }).onclick = () => this.close();
+  }
+  /* “Don't know where to start?” — make several types at once and pick what to show */
+  drawStart(body) {
+    const p = this.plugin, s = p.settings;
+    const hero = body.createDiv("ot-start-hero");
+    hero.createDiv({ cls: "ot-start-title", text: "Don't know where to start?" });
+    hero.createDiv({ cls: "ot-start-sub", text: "Pick the folders you want as object types and choose what Typefold shows. Everything can be changed later in Settings → Typefold." });
+
+    // 1. folders → types
+    body.createDiv({ cls: "ot-start-step", text: "1 · Turn folders into object types" });
+    const root = normalizePath(s.basesFolder || "Typefold");
+    const taken = new Set(Object.entries(s.types).filter(([k, c]) => !k.includes(":") && c.registered).flatMap(([k]) => p.typeFolders(k)));
+    const count = (fo) => { let n = 0; const walk = (f) => f.children.forEach((c) => c.extension === "md" ? n++ : c.children && walk(c)); walk(fo); return n; };
+    const folders = this.app.vault.getRoot().children
+      .filter((f) => f instanceof TFolder && !f.name.startsWith(".") && !f.name.startsWith("_") && f.path !== root)
+      .map((f) => ({ f, n: count(f) })).filter(({ f, n }) => n > 0 || taken.has(f.path)).sort((a, b) => b.n - a.n);
+    const pick = (this._pick ||= new Map());
+    const list = body.createDiv("ot-start-folders");
+    if (!folders.length) list.createDiv({ cls: "ot-start-none", text: "No folders yet. Create a folder for each kind of note (People, Books, Projects…), then come back here — or use “New → New type” in the sidebar." });
+    folders.forEach(({ f, n }, i) => {
+      const done = taken.has(f.path);
+      const guess = ICON_GUESS.find(([re]) => re.test(f.name.toLowerCase()))?.[1] || SUGGESTED_ICONS[i % 20];
+      const color = COLORS[i % (COLORS.length - 1)].hex;
+      const row = list.createEl("label", { cls: "ot-start-folder" + (done ? " is-done" : "") });
+      const cb = row.createEl("input", { type: "checkbox" });
+      cb.checked = done || !!pick.get(f.path);
+      cb.disabled = done;
+      cb.onchange = () => { cb.checked ? pick.set(f.path, { icon: guess, color }) : pick.delete(f.path); updateBtn(); };
+      paintIcon(row.createSpan(), guess, color);
+      row.createSpan({ cls: "ot-start-folder-name", text: f.name });
+      row.createSpan({ cls: "ot-start-folder-n", text: done ? "already a type" : `${n} notes` });
+    });
+
+    // 2. what to show
+    body.createDiv({ cls: "ot-start-step", text: "2 · Choose what you want to see" });
+    const opts = (this._opts ||= {
+      openHomeOnStartup: s.openHomeOnStartup, showFavorites: s.showFavorites, showRecents: s.showRecents, showFiles: s.showFiles,
+      showBanner: s.showBanner, showNoteChips: s.showNoteChips, showRelated: s.showRelated, newTabSearch: s.newTabSearch,
+      useFolderNotes: s.useFolderNotes !== false, oneFolderOpen: !!s.oneFolderOpen, replaceExplorer: !!s.replaceExplorer, showRibbon: s.showRibbon,
+    });
+    const grid = body.createDiv("ot-start-opts");
+    for (const [k, title, desc] of [
+      ["replaceExplorer", "Use as file explorer", "Typefold's sidebar instead of the core one"],
+      ["openHomeOnStartup", "Home on startup", "Open the Home dashboard when Obsidian starts"],
+      ["showFavorites", "Favorites", "Your bookmarks in the sidebar"],
+      ["showRecents", "Recents", "Files you opened lately"],
+      ["showFiles", "Files section", "Images, PDFs, videos, audio and tags"],
+      ["oneFolderOpen", "One folder open at a time", "Opening a folder closes the others"],
+      ["showBanner", "Banners", "Cover images above the title"],
+      ["showNoteChips", "Chips under the title", "Type, folder and property chips"],
+      ["showRelated", "Related notes", "Backlinks grouped by type at the bottom"],
+      ["useFolderNotes", "Folder notes", "Folders open their folder note (Folder notes plugin)"],
+      ["newTabSearch", "Search in new tabs", "A new tab opens a quick search panel"],
+      ["showRibbon", "Ribbon buttons", "Home and Typefold in the left ribbon"],
+    ]) {
+      const cell = grid.createEl("label", { cls: "ot-start-opt" });
+      const tx = cell.createDiv("ot-start-opt-text");
+      tx.createDiv({ cls: "ot-start-opt-title", text: title });
+      tx.createDiv({ cls: "ot-start-opt-desc", text: desc });
+      const sw = cell.createDiv("checkbox-container" + (opts[k] ? " is-enabled" : ""));
+      sw.createEl("input", { type: "checkbox", attr: { tabindex: "0" } });
+      cell.onclick = (e) => { e.preventDefault(); opts[k] = !opts[k]; sw.toggleClass("is-enabled", opts[k]); };
+    }
+
+    // apply
+    const bar = body.createDiv("ot-start-apply");
+    const btn = bar.createEl("button", { cls: "mod-cta" });
+    const updateBtn = () => btn.setText(pick.size ? `Create ${pick.size} type${pick.size > 1 ? "s" : ""} and apply` : "Apply settings");
+    updateBtn();
+    btn.onclick = async () => {
+      btn.disabled = true; btn.setText("Setting up…");
+      try {
+        const explorerWas = !!s.replaceExplorer;
+        Object.assign(s, opts);
+        await p.saveSettings(false);
+        if (s.replaceExplorer && !explorerWas) p.activateView();
+        let made = 0;
+        for (const [path, v] of pick) {
+          const label = path.split("/").pop();
+          await p.registerType({ label, icon: v.icon, color: v.color, folder: path, assign: false, folderNote: "none", typePage: s.openBaseOnClick !== false });
+          made++;
+        }
+        pick.clear();
+        await p.saveSettings();
+        await p.activateView();
+        new Notice(made ? `Typefold is set up — ${made} object type${made > 1 ? "s" : ""} created.` : "Settings applied.");
+        this.close();
+      } catch (e) {
+        new Notice(`Setup didn't finish: ${e.message || e}`);
+        btn.disabled = false; updateBtn();
+      }
+    };
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+/** edit one sidebar Tasks view: name, icon, layout and filters */
+class TaskViewModal extends Modal {
+  constructor(plugin, view, onSave) {
+    super(plugin.app);
+    this.plugin = plugin;
+    this.v = { ...view, filter: Object.assign({ scope: "all", tags: [], status: "open", date: "any" }, view.filter || {}) };
+    this.onSave = onSave;
+  }
+  onOpen() {
+    const p = this.plugin, v = this.v, f = v.filter, el = this.contentEl;
+    this.modalEl.addClass("ot-modal", "ot-taskview-modal");
+    this.titleEl.setText("Edit view");
+    new Setting(el).setName("Name").addText((t) => t.setValue(v.name).onChange((x) => { v.name = x.trim() || "View"; }));
+    const iconSet = new Setting(el).setName("Icon");
+    const grid = el.createDiv("ot-taskview-icons");
+    const icons = [...new Set([v.icon, "sun", "calendar", "calendar-range", "calendar-days", "calendar-clock", "list-checks", "list-todo", "circle-check", "check-check", "flag", "star", "flame", "alarm-clock", "inbox", "briefcase", "graduation-cap", "book-open", "home", "heart", "target", "rocket", "zap", "coffee", ...SUGGESTED_ICONS])].filter(Boolean).slice(0, 48);
+    const drawIcons = () => {
+      grid.empty();
+      for (const ic of icons) {
+        const b = grid.createDiv("clickable-icon ot-taskview-icon" + (ic === v.icon ? " is-active" : ""));
+        setIcon(b, ic);
+        b.setAttr("aria-label", ic);
+        b.onclick = () => { v.icon = ic; drawIcons(); };
+      }
+    };
+    drawIcons();
+    iconSet.settingEl.after(grid);
+    new Setting(el).setName("Layout").setDesc("Today: today and overdue. Week: a section per day. Month: a calendar with dots, then the picked day. List: grouped by date.")
+      .addDropdown((d) => d.addOptions({ today: "Today", week: "Week", month: "Month", list: "List" }).setValue(v.layout || "list").onChange((x) => { v.layout = x; }));
+    new Setting(el).setName("Place tasks by").setDesc("Which date puts a task on a day. New tasks added here get that date too.")
+      .addDropdown((d) => d.addOptions({ due: "Due date", scheduled: "Scheduled date", any: "Due date, else scheduled" }).setValue(v.dateField || "any").onChange((x) => { v.dateField = x; }));
+    new Setting(el).setName("Filters").setHeading();
+    const types = { all: "All object types" };
+    for (const t of p.visibleTypes()) types[t.key] = t.label;
+    new Setting(el).setName("Object type").addDropdown((d) => d.addOptions(types).setValue(types[f.scope] ? f.scope : "all").onChange((x) => { f.scope = x; }));
+    new Setting(el).setName("Tags").setDesc("Show only tasks with any of these tags (comma-separated). Empty = all.")
+      .addText((t) => t.setPlaceholder("School, work").setValue((f.tags || []).join(", ")).onChange((x) => { f.tags = x.split(",").map((s) => s.trim().replace(/^#/, "")).filter(Boolean); }));
+    new Setting(el).setName("Status").addDropdown((d) => d.addOptions({ open: "Open", all: "Open and completed", done: "Completed" }).setValue(f.status || "open").onChange((x) => { f.status = x; }));
+    new Setting(el).setName("Date").addDropdown((d) => d.addOptions({ any: "Any", dated: "Has a date", undated: "No date", overdue: "Overdue" }).setValue(f.date || "any").onChange((x) => { f.date = x; }));
+    const buttons = el.createDiv("ot-config-buttons");
+    buttons.createDiv("ot-spacer");
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const save = buttons.createEl("button", { cls: "mod-cta", text: "Save" });
+    save.onclick = async () => { await this.onSave(this.v); this.close(); };
+  }
+  onClose() { this.contentEl.empty(); }
 }
 
 class TypePickerModal extends Modal {
@@ -3680,7 +5489,7 @@ class DeleteTypeModal extends Modal {
     const n = p.index.get(key)?.files.length || 0;
     const withProp = p.app.vault.getMarkdownFiles().filter((f) =>
       typeValues(p.app.metadataCache.getFileCache(f)?.frontmatter?.[p.prop]).some((v) => v.toLowerCase() === key)).length;
-    const page = p.app.vault.getAbstractFileByPath(p.basePath(key, null));
+    const page = p.app.vault.getAbstractFileByPath(p.typeNotePath(key)) || p.app.vault.getAbstractFileByPath(p.basePath(key, null));
     el.createEl("p", { text: `The “${label}” tag will disappear from ${n} notes. No notes or folders are deleted or moved.` });
     const opts = { removeProperty: withProp > 0, removePage: !!page };
     const check = (text, k, show) => {
@@ -3692,7 +5501,7 @@ class DeleteTypeModal extends Modal {
       row.createSpan({ text });
     };
     check(`Also remove “${p.prop}: ${label}” from ${withProp} notes`, "removeProperty", withProp > 0);
-    check(`Move its page (${page?.path}) to the trash`, "removePage", !!page);
+    check(`Move its page (${page?.basename}) to the trash`, "removePage", !!page);
     const buttons = el.createDiv("ot-config-buttons");
     buttons.createDiv("ot-spacer");
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
@@ -3707,6 +5516,17 @@ class DeleteTypeModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
+class NoteSuggest extends AbstractInputSuggest {
+  constructor(app, inputEl) { super(app, inputEl); this.inputEl = inputEl; }
+  getSuggestions(q) {
+    const ql = q.toLowerCase();
+    return this.app.vault.getFiles().filter((f) => ["md", "canvas", "base"].includes(f.extension) && f.path.toLowerCase().includes(ql))
+      .sort((a, b) => a.path.length - b.path.length).slice(0, 50);
+  }
+  renderSuggestion(f, el) { el.setText(f.path); }
+  selectSuggestion(f) { this.inputEl.value = f.path; this.inputEl.dispatchEvent(new Event("input")); this.close(); }
+}
+
 class FolderSuggest extends AbstractInputSuggest {
   constructor(app, inputEl) { super(app, inputEl); this.inputEl = inputEl; }
   getSuggestions(q) {
@@ -3718,332 +5538,712 @@ class FolderSuggest extends AbstractInputSuggest {
   selectSuggestion(f) { this.inputEl.value = f.path; this.inputEl.dispatchEvent(new Event("input")); this.close(); }
 }
 
-class NewTypeModal extends Modal {
-  constructor(plugin, preset = {}, onDone) { super(plugin.app); this.plugin = plugin; this.preset = preset; this.onDone = onDone; }
+/* ───────── one dialog for making and editing a type (and a folder's icon): Basics · Properties · New notes · Pages ───────── */
+class TypeModal extends Modal {
+  /** opts: { mode: "create" | "edit" | "folder", key?, preset? } */
+  constructor(plugin, opts, onDone) { super(plugin.app); this.plugin = plugin; this.opts = opts; this.onDone = onDone; this.curTab = "basics"; }
   onOpen() {
-    const p = this.plugin;
-    const d = {
-      label: this.preset.label || "", folder: this.preset.folder || "",
-      icon: "box", color: COLORS[6].hex, assign: true, folderNote: true,
+    const p = this.plugin, { mode } = this.opts;
+    const key = this.opts.key;
+    const c = key ? p.conf(key) : {};
+    const preset = this.opts.preset || {};
+    const fkey = key ? p.parseFolderKey(key) : null;
+    const izNow = fkey && !c.icon ? p.iconizeInfo(fkey.path) : null;
+    // everything the dialog edits lives in `d` until Save / Create
+    const d = this.d = mode === "create" ? {
+      label: preset.label || "", folders: [preset.folder || ""], icon: "box", color: COLORS[6].hex,
+      folderProps: [], defaultProps: [], matchProperty: false, template: "", newIn: "here", onHome: true,
+      pages: p.settings.openBaseOnClick !== false ? "root" : "none",
+    } : {
+      label: c.label || "", folders: mode === "edit" ? (p.typeFolders(key).length ? p.typeFolders(key) : [""]) : [],
+      icon: (izNow && (TypefoldPlugin.iconizeToLucide(izNow.name) || izNow.name)) || p.iconFor(key),
+      color: izNow?.color || p.colorFor(key),
+      folderProps: (c.folderProps || []).map((x) => (typeof x === "string" ? { name: x } : x ? { ...x } : {})),
+      defaultProps: Object.entries(c.defaultProps || {}).map(([k, v]) => ({ k, v: Array.isArray(v) ? v.join(", ") : String(v), t: p.inferPropType(k) })),
+      matchProperty: !!c.matchProperty, template: c.template || "", newIn: c.newIn || "here", onHome: !c.hideOnHome,
+      pages: c.noPage ? "none" : c.folderNotes === "all" ? "all" : "root",
     };
-    if (d.label) for (const [re, ic] of ICON_GUESS) if (re.test(d.label.toLowerCase())) { d.icon = ic; break; }
-    this.modalEl.addClass("ot-modal", "ot-config-modal");
-    this.titleEl.setText("New object type");
+    if (mode === "create" && d.label) for (const [re, ic] of ICON_GUESS) if (re.test(d.label.toLowerCase())) { d.icon = ic; break; }
+    this.startPages = d.pages;
+
+    this.modalEl.addClass("ot-modal", "ot-config-modal", "ot-type-modal");
+    this.titleEl.setText(mode === "create" ? "New object type" : mode === "folder" ? "Folder icon & color" : "Edit object type");
     const el = this.contentEl;
 
-    const preview = el.createDiv("ot-config-preview");
-    const pIcon = preview.createSpan();
-    const pLabel = preview.createSpan({ cls: "ot-config-preview-label" });
-
-    const nameIn = el.createEl("input", { cls: "ot-modal-input ot-type-name", type: "text", placeholder: "Type name, e.g. ACTIVITY, People, Books" });
-    nameIn.value = d.label;
-
-    el.createDiv({ cls: "ot-config-label", text: "Color" });
-    const swatches = el.createDiv("ot-swatches");
-    { const s0 = swatches.createDiv("ot-swatch ot-swatch-none"); s0.dataset.hex = NO_COLOR; s0.setAttr("aria-label", "No color"); s0.onclick = () => { d.color = NO_COLOR; refresh(); }; }
-    for (const col of COLORS) {
-      const s = swatches.createDiv("ot-swatch");
-      s.dataset.hex = col.hex;
-      s.style.setProperty("--ot-color", col.hex);
-      s.setAttr("aria-label", col.name);
-      s.onclick = () => { d.color = col.hex; refresh(); };
+    // header: live preview + name
+    const head = el.createDiv("ot-tm-head");
+    this.pIcon = head.createSpan();
+    if (mode === "folder") head.createSpan({ cls: "ot-config-preview-label", text: p.labelFor(key) });
+    else {
+      const nameIn = head.createEl("input", { cls: "ot-modal-input ot-type-name ot-tm-name", type: "text",
+        placeholder: mode === "create" ? "Type name, e.g. People, Books, Projects" : p.index.get(key)?.label || key });
+      nameIn.value = d.label;
+      nameIn.oninput = () => { d.label = nameIn.value.trim(); this.refresh(); };
+      this.nameIn = nameIn;
     }
-    el.createDiv({ cls: "ot-config-label", text: "Icon" });
-    const search = el.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: "Search all icons…" });
-    const grid = el.createDiv("ot-icon-grid");
-    const allIcons = (getIconIds?.() || []).map((id) => id.replace(/^lucide-/, "")).filter((id, i, a) => a.indexOf(id) === i);
 
-    el.createDiv({ cls: "ot-config-label", text: "Folder" });
-    const folderIn = el.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: "Pick or type a folder (created if it doesn't exist)" });
-    folderIn.value = d.folder;
-    new FolderSuggest(this.app, folderIn);
-    const info = el.createDiv("ot-newtype-info");
-    const opts = el.createDiv("ot-newtype-opts");
-    const check = (label, k) => {
-      const row = opts.createEl("label", { cls: "ot-check" });
-      const cb = row.createEl("input", { type: "checkbox" });
-      cb.checked = d[k];
-      cb.onchange = () => { d[k] = cb.checked; };
-      row.createSpan({ text: label });
-      return row;
-    };
-    d.assign = false;
-    check("Add a board folder note to the folder and its subfolders", "folderNote");
-
-    const refresh = () => {
-      d.label = nameIn.value.trim();
-      d.folder = folderIn.value.trim().replace(/\/$/, "");
-      paintIcon(pIcon, d.icon, d.color);
-      pLabel.setText(d.label || "New type");
-      swatches.querySelectorAll(".ot-swatch").forEach((s) => s.toggleClass("is-selected", s.dataset.hex === d.color));
-      grid.querySelectorAll(".ot-icon-cell").forEach((s) => s.toggleClass("is-selected", s.dataset.icon === d.icon));
-      grid.style.setProperty("--ot-color", d.color);
-      const prefix = d.folder ? normalizePath(d.folder) + "/" : null;
-      const n = prefix ? this.app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(prefix)).length : 0;
-      const exists = d.folder && this.app.vault.getAbstractFileByPath(normalizePath(d.folder));
-      info.setText(!d.folder ? "Pick the folder this type stands for. Everything inside it belongs to the type."
-        : exists ? `${n} notes in this folder (and its subfolders) will belong to this type. Nothing is written to them.`
-        : "This folder will be created.");
-      save.disabled = !d.label || !d.folder;
-    };
-    const drawIcons = () => {
-      grid.empty();
-      const q = search.value.trim().toLowerCase();
-      const ids = q ? searchIcons(q) : SUGGESTED_ICONS;
-      for (const id of ids) {
-        const cell = grid.createDiv("ot-icon-cell");
-        cell.dataset.icon = id;
-        cell.setAttr("aria-label", id);
-        setIcon(cell, id);
-        if (!cell.firstChild) { cell.remove(); continue; }
-        cell.onclick = () => { d.icon = id; refresh(); };
+    // tabs
+    const TABS = mode === "folder" ? [] : [["basics", "Basics", "folder"], ["look", "Icon & color", "palette"], ["props", "Properties", "list"]];
+    if (TABS.length) {
+      const tabs = el.createDiv("ot-tm-tabs");
+      this.curTabEls = {};
+      for (const [id, label, icon] of TABS) {
+        const b = tabs.createDiv("ot-tm-tab");
+        setIcon(b.createSpan("ot-tm-tab-icon"), icon);
+        b.createSpan({ text: label });
+        b.onclick = () => { this.curTab = id; this.drawTab(); };
+        this.curTabEls[id] = b;
       }
-      refresh();
-    };
-    search.oninput = drawIcons;
-    nameIn.oninput = refresh;
-    folderIn.oninput = refresh;
+    }
+    this.body = el.createDiv("ot-tm-body" + (mode === "folder" ? " is-folder" : ""));
 
-    const buttons = el.createDiv("ot-config-buttons");
-    buttons.createDiv("ot-spacer");
-    const cancel = buttons.createEl("button", { text: "Cancel" });
-    cancel.onclick = () => this.close();
-    const save = buttons.createEl("button", { cls: "mod-cta", text: "Create type" });
-    save.onclick = async () => {
-      if (!d.label) return;
-      save.disabled = true; save.setText("Creating…");
-      const { key, changed } = await p.registerType(d);
-      new Notice(`Created type “${d.label}”${changed ? ` and set it on ${changed} notes` : ""}.`);
-      this.close();
-      this.onDone?.(key);
-      p.activateView().then(() => p.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view?.select(key));
-    };
-    drawIcons();
-    setTimeout(() => nameIn.focus(), 0);
+    // footer
+    const foot = el.createDiv("ot-config-buttons ot-tm-foot");
+    if (mode !== "create") {
+      const reset = foot.createEl("button", { text: "Reset icon" });
+      reset.onclick = () => { delete c.icon; delete c.color; d.icon = p.iconFor(key); d.color = p.colorFor(key); this.drawTab(); };
+    }
+    foot.createDiv("ot-spacer");
+    foot.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    this.saveBtn = foot.createEl("button", { cls: "mod-cta", text: mode === "create" ? "Create type" : "Save" });
+    this.saveBtn.onclick = () => this.save();
+
+    this.drawTab();
+    if (this.nameIn && mode === "create") setTimeout(() => this.nameIn.focus(), 0);
   }
-  onClose() { this.contentEl.empty(); }
-}
 
-class TypeConfigModal extends Modal {
-  constructor(plugin, key, onDone) { super(plugin.app); this.plugin = plugin; this.key = key; this.onDone = onDone; }
-  onOpen() {
-    const p = this.plugin, key = this.key;
-    const c = p.conf(key);
-    const fkey = p.parseFolderKey(key);
-    const izNow = fkey && !c.icon ? p.iconizeInfo(fkey.path) : null;
-    const draft = {
-      icon: (izNow && (TypefoldPlugin.iconizeToLucide(izNow.name) || izNow.name)) || p.iconFor(key),
-      color: izNow?.color || p.colorFor(key), folder: c.folder || "", label: c.label || "",
-    };
-    const isType = !key.includes(":");
-    this.modalEl.addClass("ot-modal", "ot-config-modal");
-    this.titleEl.setText(p.labelFor(key));
+  refresh() {
+    const d = this.d;
+    paintIcon(this.pIcon, d.icon, d.color);
+    this.pIcon.addClass("ot-tm-icon");
+    if (this.opts.mode === "create") this.saveBtn.disabled = !d.label || !d.folders.some((x) => x && x.trim());
+    for (const [id, b] of Object.entries(this.curTabEls || {})) b.toggleClass("is-active", id === this.curTab);
+  }
 
-    const preview = this.contentEl.createDiv("ot-config-preview");
-    const pIcon = preview.createSpan("ot-config-preview-icon");
-    preview.createSpan({ cls: "ot-config-preview-label", text: p.labelFor(key) });
-    const refresh = () => {
-      paintIcon(pIcon, draft.icon, draft.color);
-      swatches.querySelectorAll(".ot-swatch").forEach((s) => s.toggleClass("is-selected", s.dataset.hex === draft.color));
-      grid.querySelectorAll(".ot-icon-cell").forEach((s) => s.toggleClass("is-selected", s.dataset.icon === draft.icon));
-      grid.style.setProperty("--ot-color", draft.color);
-    };
+  drawTab() {
+    const b = this.body;
+    b.empty();
+    if (this.opts.mode === "folder" || this.curTab === "look") this.drawLook(b);
+    else if (this.curTab === "basics") this.drawBasics(b);
+    else this.drawProps(b);
+    this.refresh();
+  }
 
-    /* color presets */
-    this.contentEl.createDiv({ cls: "ot-config-label", text: "Color" });
-    const swatches = this.contentEl.createDiv("ot-swatches");
-    { const s0 = swatches.createDiv("ot-swatch ot-swatch-none"); s0.dataset.hex = NO_COLOR; s0.setAttr("aria-label", "No color"); s0.onclick = () => { draft.color = NO_COLOR; refresh(); }; }
+  section(b, title, desc) {
+    const s = b.createDiv("ot-tm-section");
+    s.createDiv({ cls: "ot-config-label", text: title });
+    if (desc) s.createDiv({ cls: "ot-tm-desc", text: desc });
+    return s;
+  }
+
+  /* Basics: folder (right under the name), then icon & colour */
+  drawBasics(b) {
+    const p = this.plugin, d = this.d, mode = this.opts.mode;
+    if (mode !== "folder") {
+      const s = this.section(b, "Folders", "Everything inside belongs to this type, subfolders included. Add more than one folder if the notes live in several places. Nothing is written to the notes.");
+      const list = s.createDiv("ot-tm-folders");
+      const draw = () => {
+        list.empty();
+        d.folders.forEach((f, i) => {
+          const row = list.createDiv("ot-tm-folder-row");
+          const inp = row.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: "Pick or type a folder (created if it doesn't exist)" });
+          inp.value = f;
+          new FolderSuggest(this.app, inp);
+          const info = row.createDiv("ot-tm-folder-info");
+          const upd = () => {
+            d.folders[i] = inp.value.trim().replace(/\/$/, "");
+            const path = d.folders[i];
+            const exists = path && this.app.vault.getAbstractFileByPath(normalizePath(path));
+            const n = exists ? this.app.vault.getMarkdownFiles().filter((x) => x.path.startsWith(normalizePath(path) + "/")).length : 0;
+            info.setText(!path ? "" : exists ? `${n} notes` : "will be created");
+            this.refresh();
+          };
+          inp.oninput = upd;
+          upd();
+          if (d.folders.length > 1) {
+            const x = row.createDiv("clickable-icon");
+            setIcon(x, "x");
+            x.setAttr("aria-label", "Remove folder");
+            x.onclick = () => { d.folders.splice(i, 1); draw(); };
+          }
+        });
+        {
+          const add = list.createDiv("ot-tm-add");
+          setIcon(add.createSpan(), "plus");
+          add.createSpan({ text: "Add another folder" });
+          add.onclick = () => { d.folders.push(""); draw(); [...list.querySelectorAll("input")].pop()?.focus(); };
+        }
+      };
+      draw();
+      this.drawPages(b);
+      this.drawWhere(b);
+      const s3 = this.section(b, "Notes outside the folder");
+      new Setting(s3).setName(`Also include notes whose “${p.prop}” is this type`)
+        .setDesc("Lets a note elsewhere in the vault belong to this type through its frontmatter.")
+        .addToggle((t) => t.setValue(d.matchProperty).onChange((v) => { d.matchProperty = v; }));
+      const s4 = this.section(b, "Home");
+      new Setting(s4).setName("Show on Home").setDesc("A card for this type on the Home dashboard.")
+        .addToggle((t) => t.setValue(d.onHome).onChange((v) => { d.onHome = v; }));
+    }
+  }
+
+  /* Icon & color (the only tab for a subfolder) */
+  drawLook(b) {
+    const d = this.d;
+    const cs = this.section(b, "Color");
+    const sw = cs.createDiv("ot-swatches");
+    const mark = () => sw.querySelectorAll(".ot-swatch").forEach((s) => s.toggleClass("is-selected", s.dataset.hex === d.color));
+    { const s0 = sw.createDiv("ot-swatch ot-swatch-none"); s0.dataset.hex = NO_COLOR; s0.setAttr("aria-label", "No color"); s0.onclick = () => { d.color = NO_COLOR; mark(); grid.style.setProperty("--ot-color", d.color); this.refresh(); }; }
     for (const col of COLORS) {
-      const s = swatches.createDiv("ot-swatch");
+      const s = sw.createDiv("ot-swatch");
       s.dataset.hex = col.hex;
       s.style.setProperty("--ot-color", col.hex);
       s.setAttr("aria-label", col.name);
-      s.onclick = () => { draft.color = col.hex; refresh(); };
+      s.onclick = () => { d.color = col.hex; mark(); grid.style.setProperty("--ot-color", d.color); this.refresh(); };
     }
-
-    /* icon grid */
-    this.contentEl.createDiv({ cls: "ot-config-label", text: "Icon" });
-    const search = this.contentEl.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: "Search all icons…" });
-    const grid = this.contentEl.createDiv("ot-icon-grid");
-    const allIcons = (getIconIds?.() || []).map((id) => id.replace(/^lucide-/, "")).filter((id, i, a) => a.indexOf(id) === i);
+    mark();
+    const is = this.section(b, "Icon");
+    const search = is.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: "Search all icons…" });
+    const grid = is.createDiv("ot-icon-grid");
+    grid.style.setProperty("--ot-color", d.color);
     const drawIcons = () => {
       grid.empty();
       const q = search.value.trim().toLowerCase();
       const ids = q ? searchIcons(q) : SUGGESTED_ICONS;
       if (!ids.length) grid.createDiv({ cls: "ot-empty", text: "No icons found" });
       for (const id of ids) {
-        const cell = grid.createDiv("ot-icon-cell");
+        const cell = grid.createDiv("ot-icon-cell" + (id === d.icon ? " is-selected" : ""));
         cell.dataset.icon = id;
         cell.setAttr("aria-label", id);
         setIcon(cell, id);
         if (!cell.firstChild) { cell.remove(); continue; }
-        cell.onclick = () => { draft.icon = id; refresh(); };
+        cell.onclick = () => { d.icon = id; grid.querySelectorAll(".ot-icon-cell").forEach((x) => x.toggleClass("is-selected", x.dataset.icon === id)); this.refresh(); };
       }
-      refresh();
     };
     search.oninput = drawIcons;
     drawIcons();
+  }
 
-    if (isType) {
-      new Setting(this.contentEl).setName("Display name")
-        .addText((t) => t.setValue(draft.label).setPlaceholder(p.index.get(key)?.label || key).onChange((v) => { draft.label = v.trim(); }));
-      draft.folders = p.typeFolders(key).join("\n");
-      new Setting(this.contentEl).setName("Folders").setDesc("One per line. Notes inside these folders belong to this type; new notes go into the first one.")
-        .addTextArea((t) => { t.setValue(draft.folders).setPlaceholder("e.g. School").onChange((v) => { draft.folders = v; }); t.inputEl.rows = 3; t.inputEl.addClass("ot-folders-input"); });
-      const lvl = (c.folderProps || []).map((x) => (typeof x === "string" ? x : x.match ? `${x.name}=${x.match}` : x.name)).join(", ");
-      new Setting(this.contentEl).setName("Properties from folders")
-        .setDesc("One name per folder level below the type's folder, comma-separated. e.g. “semester, course” fills semester from the 1st level and course from the 2nd. Add =regex to only use matching folder names.")
-        .addText((t) => t.setValue(lvl).setPlaceholder("semester, course").onChange((v) => { draft.folderProps = v; }));
-      const defs = Object.entries(c.defaultProps || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
-      new Setting(this.contentEl).setName("Properties for new notes")
-        .setDesc("One “name: value” per line. {{date}} becomes today's date.")
-        .addTextArea((t) => { t.setValue(defs).setPlaceholder("status: to-do\ncreated: {{date}}").onChange((v) => { draft.defaultProps = v; }); t.inputEl.rows = 3; t.inputEl.addClass("ot-folders-input"); });
-      new Setting(this.contentEl).setName("Also match the type property").setDesc(`Include notes anywhere whose “${p.prop}” is “${p.labelFor(key)}”.`)
-        .addToggle((t) => t.setValue(!!c.matchProperty).onChange((v) => { draft.matchProperty = v; }));
+  /* Properties: from folder levels, fixed ones for new notes, and matching by the type property */
+  drawProps(b) {
+    const p = this.plugin, d = this.d;
+    const folders = d.folders.filter(Boolean).map((f) => normalizePath(f));
+    const has = (k) => d.defaultProps.some((r) => r.k === k);
+    const ownBox = { el: null };
+
+    // 1 · properties the notes in these folders already share
+    const s1 = this.section(b, "1 · Common properties in this folder",
+      "Properties the notes here already use, most used first. Tick the ones every new note should start with.");
+    const files = this.app.vault.getMarkdownFiles().filter((f) => folders.some((dir) => f.path.startsWith(dir + "/")) && !p.isFolderNote(f) && !p.isTemplate(f)).slice(0, 3000);
+    const counts = new Map();
+    const skip = new Set(["position", "cssclasses", p.prop]);
+    const fromFolders = new Set(d.folderProps.map((x) => x?.name).filter(Boolean));
+    for (const f of files) {
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {};
+      for (const [k, v] of Object.entries(fm)) {
+        if (skip.has(k)) continue;
+        const e = counts.get(k) || { n: 0, vals: new Map() };
+        e.n++;
+        if (v != null && typeof v !== "object" && String(v).trim() && String(v).length <= 40) e.vals.set(String(v), (e.vals.get(String(v)) || 0) + 1);
+        counts.set(k, e);
+      }
+    }
+    // most used first (ties by name)
+    const common = [...counts.entries()].filter(([, e]) => e.n >= 2).sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0])).slice(0, 20);
+    if (!folders.length) s1.createDiv({ cls: "ot-tm-desc", text: "Pick a folder in Basics first." });
+    else if (!common.length) s1.createDiv({ cls: "ot-tm-desc", text: files.length ? "These notes don't share any properties yet." : "No notes in this folder yet." });
+    const list = s1.createDiv("ot-tm-common");
+    for (const [k, e] of common) {
+      const top = [...e.vals.entries()].sort((a, b) => b[1] - a[1])[0];
+      const row = list.createEl("label", { cls: "ot-tm-common-row" });
+      row.style.setProperty("--ot-share", `${Math.round((e.n / Math.max(1, files.length)) * 100)}%`);
+      const cb = row.createEl("input", { type: "checkbox" });
+      const auto = fromFolders.has(k);
+      cb.checked = auto || has(k);
+      cb.disabled = auto;
+      row.createSpan({ cls: "ot-tm-common-name", text: k });
+      if (auto) row.createSpan({ cls: "ot-tm-common-badge", text: "from folders" });
+      row.createSpan({ cls: "ot-tm-common-n", text: `${e.n} of ${files.length} notes${top ? ` · e.g. ${top[0]}` : ""}` });
+      if (auto) { row.addClass("is-auto"); continue; }
+      cb.onchange = () => {
+        if (cb.checked && !has(k)) d.defaultProps.push({ k, v: top && top[1] / e.n >= 0.6 ? top[0] : "", t: p.inferPropType(k) });
+        if (!cb.checked) d.defaultProps = d.defaultProps.filter((r) => r.k !== k);
+        drawOwn();
+      };
     }
 
-    const buttons = this.contentEl.createDiv("ot-config-buttons");
-    const reset = buttons.createEl("button", { text: "Reset" });
-    reset.onclick = () => { delete c.icon; delete c.color; draft.icon = p.iconFor(key); draft.color = p.colorFor(key); refresh(); };
-    buttons.createDiv("ot-spacer");
-    const save = buttons.createEl("button", { cls: "mod-cta", text: "Done" });
-    save.onclick = async () => {
+    // 2 · one property per folder level
+    const root = folders[0] && this.app.vault.getAbstractFileByPath(folders[0]);
+    const levels = [];
+    if (root instanceof TFolder) {
+      const walk = (fo, depth) => {
+        if (depth > 4) return;
+        for (const c of fo.children) if (c instanceof TFolder && !c.name.startsWith(".")) {
+          (levels[depth - 1] ||= new Set()).add(c.name);
+          walk(c, depth + 1);
+        }
+      };
+      walk(root, 1);
+    }
+    const s2 = this.section(b, "2 · From the folder structure",
+      "Name a property for each folder level below the type's folder. New notes get it filled in from the folder they're made in.");
+    const lv = s2.createDiv("ot-tm-levels");
+    const nLevels = Math.max(levels.length, d.folderProps.length, 1);
+    for (let i = 0; i < Math.min(nLevels, 5); i++) {
+      const row = lv.createDiv("ot-tm-level");
+      row.createDiv({ cls: "ot-tm-level-n", text: `Level ${i + 1}` });
+      const ex = [...(levels[i] || [])].slice(0, 3);
+      row.createDiv({ cls: "ot-tm-level-ex", text: ex.length ? ex.join(", ") + (levels[i].size > 3 ? "…" : "") : "no folders yet" });
+      const inp = row.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: i === 0 ? "e.g. semester" : i === 1 ? "e.g. course" : "property name" });
+      inp.value = d.folderProps[i]?.name || "";
+      inp.oninput = () => { d.folderProps[i] = { ...(d.folderProps[i] || {}), name: inp.value.trim() }; };
+    }
+
+    // 3 · your own properties
+    const s3 = this.section(b, "3 · Your own", "Added to every new note of this type. {{date}} becomes today's date. A property's type is shared by the whole vault, as in Obsidian.");
+    ownBox.el = s3.createDiv("ot-tm-props");
+    const drawOwn = () => {
+      const rows = ownBox.el;
+      rows.empty();
+      const TYPES = [["text", "Text"], ["multitext", "List"], ["number", "Number"], ["checkbox", "Checkbox"], ["date", "Date"], ["datetime", "Date & time"]];
+      d.defaultProps.forEach((r, i) => {
+        r.t ||= p.inferPropType(r.k);
+        const row = rows.createDiv("ot-tm-prop");
+        const k = row.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: "name" });
+        k.value = r.k;
+        k.oninput = () => { r.k = k.value.trim(); };
+        // until you pick a type yourself, it follows what existing notes use for this name (text if none)
+        k.onchange = () => { if (!r.manual) { const t = p.inferPropType(r.k); if (t !== r.t) { r.t = t; drawOwn(); } } };
+        const sel = row.createEl("select", { cls: "dropdown ot-tm-prop-type" });
+        for (const [val, label] of TYPES) sel.createEl("option", { value: val, text: label });
+        if (![...sel.options].some((o) => o.value === r.t)) sel.createEl("option", { value: r.t, text: r.t });
+        sel.value = r.t;
+        sel.onchange = () => { r.t = sel.value; r.manual = true; if (r.t === "checkbox" && !["true", "false"].includes(r.v)) r.v = "false"; drawOwn(); };
+        const vwrap = row.createDiv("ot-tm-prop-val");
+        if (r.t === "checkbox") {
+          const cb = vwrap.createEl("input", { type: "checkbox" });
+          cb.checked = r.v === "true";
+          cb.onchange = () => { r.v = cb.checked ? "true" : "false"; };
+          vwrap.createSpan({ cls: "ot-tm-desc", text: "checked in new notes" });
+        } else {
+          const ph = { multitext: "item, item…", number: "0", date: "YYYY-MM-DD or {{date}}", datetime: "YYYY-MM-DDTHH:mm or {{date}}" }[r.t] || "value (optional)";
+          const v = vwrap.createEl("input", { cls: "ot-modal-input", type: r.t === "number" ? "number" : "text", placeholder: ph });
+          v.value = r.v;
+          v.oninput = () => { r.v = v.value; };
+        }
+        const x = row.createDiv("clickable-icon");
+        setIcon(x, "x");
+        x.setAttr("aria-label", "Remove");
+        x.onclick = () => {
+          d.defaultProps.splice(i, 1);
+          list.querySelectorAll(".ot-tm-common-row").forEach((cr) => { if (cr.querySelector(".ot-tm-common-name").textContent === r.k) cr.querySelector("input").checked = false; });
+          drawOwn();
+        };
+      });
+      const add = rows.createDiv("ot-tm-add");
+      setIcon(add.createSpan(), "plus");
+      add.createSpan({ text: "Add property" });
+      add.onclick = () => { d.defaultProps.push({ k: "", v: "", t: "text" }); drawOwn(); [...rows.querySelectorAll(".ot-tm-prop")].pop()?.querySelector("input")?.focus(); };
+    };
+    drawOwn();
+
+    // 4 · template
+    const s4 = this.section(b, "4 · Template", "New notes start as a copy of this note — its text and its properties. Leave empty for a blank note.");
+    const tin = s4.createEl("input", { cls: "ot-modal-input", type: "text", placeholder: "No template — pick a note" });
+    tin.value = d.template;
+    new NoteSuggest(this.app, tin);
+    const info = s4.createDiv("ot-tm-desc");
+    const upd = () => {
+      d.template = tin.value.trim();
+      const f = d.template && this.app.vault.getAbstractFileByPath(normalizePath(d.template));
+      if (!d.template) info.setText("");
+      else if (!f) info.setText("Note not found.");
+      else {
+        const fm = Object.keys(this.app.metadataCache.getFileCache(f)?.frontmatter || {}).filter((k) => k !== "position");
+        info.setText(fm.length ? `Copies its text and these properties: ${fm.join(", ")}. {{title}}, {{date}} and {{time}} are filled in.` : "Copies its text. {{title}}, {{date}} and {{time}} are filled in.");
+      }
+    };
+    tin.oninput = upd;
+    upd();
+  }
+
+  /* where new notes are saved */
+  drawWhere(b) {
+    const d = this.d;
+    const s2 = this.section(b, "Where new notes go");
+    const seg = s2.createDiv("ot-tasks-seg");
+    const hint = s2.createDiv("ot-tm-desc");
+    const drawSeg = () => {
+      seg.empty();
+      for (const [v, t] of [["here", "The folder you're in"], ["root", "Always the type's folder"]]) {
+        const bt = seg.createDiv({ cls: "ot-tasks-seg-btn" + (d.newIn === v ? " is-active" : ""), text: t });
+        bt.onclick = () => { d.newIn = v; drawSeg(); };
+      }
+      hint.setText(d.newIn === "here" ? "Making a note while a subfolder is selected puts it in that subfolder (and fills its folder properties)."
+        : `Always in ${d.folders[0] || "the type's folder"}, whichever subfolder is selected.`);
+    };
+    drawSeg();
+  }
+
+  drawPages(b) {
+    const p = this.plugin, d = this.d, mode = this.opts.mode;
+    const s = this.section(b, "Pages", "A page is a note with a table (or board) of notes, opened when you click the type or folder.");
+    const seg = s.createDiv("ot-tasks-seg");
+    const hint = s.createDiv("ot-tm-desc");
+    const subOk = p.fnSettings().enabled;
+    const HINT = {
+      none: "No pages. Clicking the type shows its notes in the sidebar list.",
+      root: "One page for this type with all its notes.",
+      all: subOk ? "The type's page, plus a board page (folder note) in every subfolder — new subfolders too."
+        : "The type's page. Subfolder pages need the Folder notes plugin and “Use folder notes” on.",
+    };
+    const drawSeg = () => {
+      seg.empty();
+      for (const [v, t] of [["none", "Don't create"], ["root", "This folder"], ["all", "Folder + subfolders"]]) {
+        const bt = seg.createDiv({ cls: "ot-tasks-seg-btn" + (d.pages === v ? " is-active" : ""), text: t });
+        bt.onclick = () => { d.pages = v; drawSeg(); };
+      }
+      hint.setText(HINT[d.pages] + (mode === "edit" && d.pages !== this.startPages ? "  Pages that already exist are kept." : ""));
+    };
+    drawSeg();
+    if (p.settings.openBaseOnClick === false) s.createDiv({ cls: "ot-tm-desc ot-settings-warn", text: "Type pages are turned off in Settings → Sidebar, so none are opened for any type." });
+    if (mode === "edit") {
+      const page = this.app.vault.getAbstractFileByPath(p.typeNotePath(this.opts.key));
+      if (page) {
+        const s2 = this.section(b, "Page banner");
+        new Setting(s2).setName("Banner image").setDesc("The picture at the top of this type's page.")
+          .addButton((bt) => bt.setButtonText("Choose…").onClick(() => new BannerPickerModal(p, page).open()));
+      }
+    }
+  }
+
+  async save() {
+    const p = this.plugin, d = this.d, mode = this.opts.mode;
+    const props = () => d.folderProps.map((x) => x && x.name ? (x.match ? { name: x.name, match: x.match } : x.name) : null);
+    const trimProps = (arr) => { while (arr.length && !arr[arr.length - 1]) arr.pop(); return arr.map((x) => x || null); };
+    const defaults = () => {
+      const rows = d.defaultProps.filter((r) => r.k);
+      for (const r of rows) if (r.manual) p.setPropType(r.k, r.t || "text"); // only types you picked yourself change the vault-wide type
+      return Object.fromEntries(rows.map((r) => [r.k, p.coerceProp(r.t || "text", r.v)]));
+    };
+    this.saveBtn.disabled = true;
+    try {
+      if (mode === "create") {
+        if (!d.label || !d.folders.some((x) => x.trim())) return;
+        this.saveBtn.setText("Creating…");
+        const folders = [...new Set(d.folders.map((x) => x.trim().replace(/\/$/, "")).filter(Boolean))];
+        const { key, changed } = await p.registerType({ label: d.label, icon: d.icon, color: d.color, folder: folders[0], assign: false,
+          typePage: d.pages !== "none", folderNote: d.pages === "all" ? "subs" : "none" });
+        const c = p.conf(key);
+        // the other folders: same type, same folder-note choice
+        for (const f of folders.slice(1)) {
+          await p.ensureFolder(normalizePath(f));
+          if (d.pages === "all") await p.ensureFolderNotesUnder(f, d.label, true);
+        }
+        c.folders = folders.map((f) => normalizePath(f));
+        c.folderProps = trimProps(props());
+        c.defaultProps = defaults();
+        if (d.matchProperty) c.matchProperty = true;
+        if (d.template) c.template = d.template;
+        if (d.newIn === "root") c.newIn = "root";
+        if (!d.onHome) c.hideOnHome = true;
+        await p.saveSettings();
+        new Notice(`Created type “${d.label}”${changed ? ` and set it on ${changed} notes` : ""}.`);
+        this.close();
+        this.onDone?.(key);
+        p.activateView().then(() => p.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view?.select(key));
+        return;
+      }
+      const key = this.opts.key;
       const fresh = await p.loadData();
       if (fresh) { p.settings = Object.assign({}, DEFAULT_SETTINGS, fresh); p.settings.types ||= {}; }
       const c = p.conf(key);
-      c.icon = draft.icon; c.color = draft.color;
-      // keep Iconize in step: folders store their icon in Iconize; types write theirs onto their folder(s)
+      c.icon = d.icon; c.color = d.color;
       if (p.iconizePlugin()) {
         const fk2 = p.parseFolderKey(key);
-        const isDefault = draft.icon === "folder" && (!draft.color || draft.color === p.colorFor(fk2?.type || key));
-        if (fk2) { await p.writeIconize(fk2.path, isDefault ? null : draft.icon, draft.color); delete c.icon; if (isDefault) delete c.color; }
-        else if (!key.includes(":")) for (const f of p.typeFolders(key)) await p.writeIconize(f, draft.icon, draft.color);
+        const isDefault = d.icon === "folder" && (!d.color || d.color === p.colorFor(fk2?.type || key));
+        if (fk2) { await p.writeIconize(fk2.path, isDefault ? null : d.icon, d.color); delete c.icon; if (isDefault) delete c.color; }
+        else for (const f of d.folders.filter(Boolean)) await p.writeIconize(f, d.icon, d.color);
       }
-      if (isType) {
-        if (draft.folders != null) c.folders = draft.folders.split("\n").map((x) => x.trim().replace(/\/$/, "")).filter(Boolean);
-        if (draft.matchProperty != null) c.matchProperty = draft.matchProperty;
-        if (draft.folderProps != null) c.folderProps = draft.folderProps.split(",").map((x) => x.trim()).filter(Boolean)
-          .map((x) => x.includes("=") ? { name: x.split("=")[0].trim(), match: x.slice(x.indexOf("=") + 1).trim() } : x);
-        if (draft.defaultProps != null) {
-          const o = {};
-          for (const line of draft.defaultProps.split("\n")) { const i = line.indexOf(":"); if (i > 0) o[line.slice(0, i).trim()] = line.slice(i + 1).trim(); }
-          c.defaultProps = o;
-        }
+      if (mode === "edit") {
+        c.folders = d.folders.map((x) => x.trim().replace(/\/$/, "")).filter(Boolean);
         delete c.folder;
-        if (draft.label) c.label = draft.label; else delete c.label;
+        if (d.label) c.label = d.label; else delete c.label;
+        c.folderProps = trimProps(props());
+        c.defaultProps = defaults();
+        if (d.matchProperty) c.matchProperty = true; else delete c.matchProperty;
+        if (d.template) c.template = d.template; else delete c.template;
+        if (d.newIn === "root") c.newIn = "root"; else delete c.newIn;
+        if (d.pages === "none") c.noPage = true; else delete c.noPage;
+        if (d.onHome) delete c.hideOnHome; else c.hideOnHome = true;
+        c.folderNotes = d.pages === "all" ? "all" : "none";
       }
       await p.saveSettings();
+      if (mode === "edit" && d.pages === "all" && this.startPages !== "all") {
+        for (const f of c.folders) await p.ensureFolderNotesUnder(f, p.labelFor(key), true);
+      }
       this.close();
       this.onDone?.();
-    };
+    } finally { if (this.saveBtn?.isConnected) { this.saveBtn.disabled = false; } }
   }
   onClose() { this.contentEl.empty(); }
 }
+class NewTypeModal extends TypeModal {
+  constructor(plugin, preset = {}, onDone) { super(plugin, { mode: "create", preset }, onDone); }
+}
+class TypeConfigModal extends TypeModal {
+  constructor(plugin, key, onDone) { super(plugin, { mode: key.includes(":") ? "folder" : "edit", key }, onDone); }
+}
+
 
 /* ───────────────────────────── Settings ───────────────────────────── */
 
 class TypefoldSettingTab extends PluginSettingTab {
-  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
+  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; this.tab = "general"; }
   display() {
-    const p = this.plugin, el = this.containerEl;
-    el.empty();
+    const p = this.plugin, root = this.containerEl;
+    root.empty();
+    root.addClass("ot-settings");
     const s = p.settings;
-    const toggle = (name, desc, k) => new Setting(el).setName(name).setDesc(desc)
-      .addToggle((t) => t.setValue(s[k]).onChange(async (v) => { s[k] = v; await p.saveSettings(); }));
 
-    new Setting(el).setName("Navigator").setHeading();
-    new Setting(el).setName("Use as default file explorer")
-      .setDesc("Hides the core File explorer tab, opens this panel on startup, and sends “Open file explorer” and “Reveal current file in navigation” here.")
-      .addToggle((t) => t.setValue(!!s.replaceExplorer).onChange(async (v) => {
-        s.replaceExplorer = v; await p.saveSettings(false);
-        if (v) p.activateView();
-      }));
-    new Setting(el).setName("Type property").setDesc("Frontmatter property that defines a note's object type.")
-      .addText((t) => t.setValue(s.property).onChange(async (v) => { s.property = v.trim() || "type"; await p.saveSettings(); }));
-    new Setting(el).setName("Minimum notes per type").setDesc("Hide types with fewer notes than this.")
-      .addSlider((sl) => sl.setLimits(1, 10, 1).setValue(s.minCount).setDynamicTooltip()
-        .onChange(async (v) => { s.minCount = v; await p.saveSettings(); }));
-    new Setting(el).setName("Sort types by")
-      .addDropdown((d) => d.addOptions({ manual: "Manual (drag in sidebar)", name: "Name", count: "Note count" }).setValue(s.sortTypes)
-        .onChange(async (v) => { s.sortTypes = v; await p.saveSettings(); }));
-    toggle("Show Inbox / Calendar / Tasks", "Inbox = notes without a type, Tasks = notes with open checkboxes.", "showSmart");
-    toggle("Show Files section", "Images, PDFs, videos and audio.", "showFiles");
-    toggle("Show Favorites", "Your bookmarked files and folders (core Bookmarks plugin), as a Favorites row under Calendar.", "showFavorites");
-    toggle("Show counts", "Show note counts next to each type.", "showCounts");
-    new Setting(el).setName("Iconize icons")
-      .setDesc("Use & sync: show Iconize's folder/file icons here and write icon changes made here back to Iconize. Ignore: use only this plugin's icons.")
-      .addDropdown((d) => d.addOptions({ sync: "Use & sync", ignore: "Ignore" }).setValue(s.iconize || "sync")
-        .onChange(async (v) => { s.iconize = v; await p.saveSettings(); }));
-    toggle("View tabs for Bases", "Show a base's views as tabs next to the result count — for .base files and bases embedded in notes.", "viewTabs");
-    toggle("Follow the open note", "When you open a note from anywhere (breadcrumbs, links, search), select its folder here.", "autoReveal");
-    toggle("Open type page on click", "Clicking a type opens its .base page (all notes of that type) in the main area.", "openBaseOnClick");
-    new Setting(el).setName("Folder for type pages").setDesc("Where the per-type .base files are created.")
-      .addText((t) => t.setValue(s.basesFolder).setPlaceholder("Typefold")
-        .onChange(async (v) => { s.basesFolder = v.trim() || "Typefold"; await p.saveSettings(false); }));
-    new Setting(el).setName("Default folder for new objects")
-      .addText((t) => t.setValue(s.defaultFolder).setPlaceholder("vault root")
-        .onChange(async (v) => { s.defaultFolder = v.trim(); await p.saveSettings(false); }));
+    // tabs
+    const TABS = [["general", "General", "settings"], ["sidebar", "Sidebar", "panel-left"], ["notes", "Notes", "file-text"],
+      ["home", "Home", "house"], ["tasks", "Tasks", "circle-check"], ["types", "Types", "shapes"], ["more", "More", "puzzle"]];
+    const nav = root.createDiv("ot-settings-tabs");
+    for (const [id, label, icon] of TABS) {
+      const b = nav.createDiv({ cls: "ot-settings-tab" + (this.tab === id ? " is-active" : "") });
+      setIcon(b.createSpan("ot-settings-tab-icon"), icon);
+      b.createSpan({ text: label });
+      b.onclick = () => { this.tab = id; this.display(); };
+    }
+    const el = root.createDiv("ot-settings-body");
+    const heading = (name, desc) => {
+      const h = new Setting(el).setName(name).setHeading();
+      if (desc) h.setDesc(desc);
+      return h;
+    };
+    const toggle = (name, desc, k, rebuild = true) => new Setting(el).setName(name).setDesc(desc)
+      .addToggle((t) => t.setValue(!!s[k]).onChange(async (v) => { s[k] = v; await p.saveSettings(rebuild); }));
 
-    new Setting(el).setName("Home").setHeading();
-    new Setting(el).setName("Your name").setDesc("Used in the Home greeting.")
-      .addText((t) => t.setValue(s.userName || "").onChange(async (v) => { s.userName = v.trim(); await p.saveSettings(false); }));
-    toggle("Weather on Home", "Uses open-meteo.com with the location below (no account needed).", "showWeather");
-    new Setting(el).setName("Weather location").setDesc("Place name, latitude, longitude")
-      .addText((t) => t.setValue(s.weatherPlace || "").setPlaceholder("Seoul").onChange(async (v) => { s.weatherPlace = v.trim(); await p.saveSettings(false); }))
-      .addText((t) => t.setValue(String(s.weatherLat)).onChange(async (v) => { s.weatherLat = parseFloat(v) || 0; p._wx = null; await p.saveSettings(false); }))
-      .addText((t) => t.setValue(String(s.weatherLon)).onChange(async (v) => { s.weatherLon = parseFloat(v) || 0; p._wx = null; await p.saveSettings(false); }));
-    toggle("Open Home on startup", "Show Home every time Obsidian starts.", "openHomeOnStartup");
-    toggle("Search panel in new tabs", "A new empty tab opens a search panel to pick the page to open.", "newTabSearch");
-    new Setting(el).setName("Object notes").setHeading();
-    toggle("Banner image", "Show the cover / banner / image property above the title.", "showBanner");
-    toggle("Related objects", "Show backlinks grouped by type as cards at the bottom of the note.", "showRelated");
-    toggle("Type icons before links", "Prefix internal links with the linked note's type icon.", "linkIcons");
-    new Setting(el).setName("Hide properties by default").setDesc("Click “N properties” in the status bar to show them.")
-      .addToggle((t) => t.setValue(s.hideProperties).onChange(async (v) => {
-        s.hideProperties = v; p.propsVisible = !v; await p.saveSettings(false); p.updateStatus();
-      }));
-    toggle("Capacities look", "Tinted active tab and accent links.", "themeTweaks");
+    if (this.tab === "general") {
+      const g = el.createDiv("ot-settings-guide");
+      g.createDiv({ cls: "ot-settings-guide-text", text: "Don't know where to start? Make several object types at once and choose what Typefold shows." });
+      const gb = g.createEl("button", { cls: "mod-cta", text: "Start here" });
+      gb.onclick = () => new WhatsNewModal(p, "start").open();
+      const gb2 = g.createEl("button", { text: "Guide & what's new" });
+      gb2.onclick = () => new WhatsNewModal(p, "new").open();
 
-    new Setting(el).setName("Companion plugins").setHeading();
-    el.createEl("p", { cls: "setting-item-description", text: "Typefold works on its own. These add to it — install any you like." });
-    for (const comp of COMPANIONS) {
-      const installed = !!this.app.plugins?.manifests?.[comp.id];
-      const enabled = !!this.app.plugins?.enabledPlugins?.has(comp.id);
-      const row = new Setting(el).setName(comp.name + (comp.mine ? " ✦" : "")).setDesc(comp.why);
-      if (enabled) row.addButton((b) => b.setButtonText("Enabled").setDisabled(true));
-      else if (installed) row.addButton((b) => b.setButtonText("Enable").setCta().onClick(async () => { await this.app.plugins.enablePluginAndSave(comp.id); this.display(); }));
-      else row.addButton((b) => b.setButtonText("Install").onClick(() => window.open(`obsidian://show-plugin?id=${comp.id}`)));
+      heading("Basics");
+      new Setting(el).setName("Use as default file explorer")
+        .setDesc("Hides the core File explorer tab, opens this panel on startup, and sends “Open file explorer” and “Reveal current file in navigation” here.")
+        .addToggle((t) => t.setValue(!!s.replaceExplorer).onChange(async (v) => {
+          s.replaceExplorer = v; await p.saveSettings(false);
+          if (v) p.activateView();
+        }));
+      new Setting(el).setName("Type property").setDesc("Frontmatter property that can also put a note into a type (besides its folder).")
+        .addText((t) => t.setValue(s.property).onChange(async (v) => { s.property = v.trim() || "type"; await p.saveSettings(); }));
+      toggle("Search panel in new tabs", "A new empty tab opens a search panel to pick the page to open (⌘T).", "newTabSearch", false);
+
+      heading("Interface");
+      toggle("Ribbon buttons", "Home and Typefold buttons in the left ribbon.", "showRibbon", false);
+      toggle("Status bar", "Backlink and property counts in the status bar (click the property count to show or hide properties).", "showStatusBar", false);
+      toggle("Capacities look", "Tinted active tab and accent links.", "themeTweaks", false);
+      toggle("Show what's new after updates", "Open the guide with the changes the first time Obsidian starts after an update.", "showWhatsNew", false);
     }
 
-    new Setting(el).setName("Developer").setHeading();
-    toggle("Reload when plugin files change", "For editing this plugin: reload it automatically when main.js or styles.css change.", "devAutoReload");
+    if (this.tab === "sidebar") {
+      heading("Shortcuts", "The rows at the top of the sidebar.");
+      const shown = () => s.smartItems || SMART.map((x) => x.key);
+      for (const sm of SMART) {
+        const desc = { "smart:home": "Opens Home.", "smart:inbox": "Notes and documents (PDF, Word, canvas…) outside every object type.",
+          "smart:calendar": p.calendarMerged() ? "Daily notes and your tasks, in tabs." : "Daily notes, newest first.",
+          "smart:tasks": p.calendarMerged() ? "Shown inside Calendar while the two are combined (see below)." : "Your tasks by day, week, month or list." }[sm.key] || "";
+        new Setting(el).setName(sm.label).setDesc(desc).addToggle((t) => t.setValue(s.showSmart && shown().includes(sm.key)).onChange(async (v) => {
+          const set = new Set(shown());
+          v ? set.add(sm.key) : set.delete(sm.key);
+          s.smartItems = SMART.map((x) => x.key).filter((k) => set.has(k));
+          if (v) s.showSmart = true;
+          await p.saveSettings();
+        }));
+      }
+      new Setting(el).setName("Calendar and Tasks as separate rows")
+        .setDesc("Off: one Calendar row with a Daily notes tab next to your task views, and daily notes linked on each day. On: Calendar (daily notes) and Tasks are two rows.")
+        .addToggle((t) => t.setValue(!!s.splitCalendarTasks).onChange(async (v) => { s.splitCalendarTasks = v; await p.saveSettings(); this.display(); }));
+      toggle("Favorites", "Your bookmarked files and folders (core Bookmarks plugin), as a small foldable section.", "showFavorites");
+      toggle("Recents", "Files you opened lately, as a small foldable section.", "showRecents");
+      new Setting(el).setName("Recents to show").addSlider((sl) => sl.setLimits(3, 20, 1).setValue(s.recentsCount || 7).setDynamicTooltip()
+        .onChange(async (v) => { s.recentsCount = v; await p.saveSettings(); }));
 
-    new Setting(el).setName("Types").setHeading();
-    const all = [...p.index.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
-    for (const [key, entry] of all) {
-      const c = s.types[key] || {};
-      const row = new Setting(el).setName(`${p.labelFor(key)}`).setDesc(`${entry.files.length} notes`);
-      row.nameEl.prepend(paintIcon(createSpan("ot-setting-icon"), p.iconFor(key), p.colorFor(key)));
-      row.addExtraButton((b) => b.setIcon("palette").setTooltip("Icon & color").onClick(() =>
-        new TypeConfigModal(p, key, () => this.display()).open()));
-      row.addExtraButton((b) => b.setIcon("trash-2").setTooltip("Delete type…").onClick(() => {
-        const m = new DeleteTypeModal(p, key);
-        const close = m.onClose.bind(m);
-        m.onClose = () => { close(); this.display(); };
-        m.open();
-      }));
-      row.addToggle((t) => t.setTooltip("Show in sidebar").setValue(!c.hidden).onChange(async (v) => {
-        p.conf(key).hidden = !v; await p.saveSettings();
-      }));
+      heading("Sections");
+      toggle("Files section", "Images, PDFs, videos, audio and tags.", "showFiles");
+      toggle("Counts", "Note counts next to each type.", "showCounts");
+      toggle("New & Search buttons", "The buttons at the top of the sidebar.", "showNavTop", false);
+      toggle("Footer", "Vault name, settings, light/dark and command palette at the bottom.", "showNavFooter", false);
+
+      heading("Object types list");
+      new Setting(el).setName("Minimum notes per type").setDesc("Hide types with fewer notes than this.")
+        .addSlider((sl) => sl.setLimits(1, 10, 1).setValue(s.minCount).setDynamicTooltip()
+          .onChange(async (v) => { s.minCount = v; await p.saveSettings(); }));
+      new Setting(el).setName("Sort types by")
+        .addDropdown((d) => d.addOptions({ manual: "Manual (drag in sidebar)", name: "Name", count: "Note count" }).setValue(s.sortTypes)
+          .onChange(async (v) => { s.sortTypes = v; await p.saveSettings(); }));
+      new Setting(el).setName("Iconize icons")
+        .setDesc("Use & sync: show Iconize's folder/file icons here and write icon changes made here back to Iconize. Ignore: use only this plugin's icons.")
+        .addDropdown((d) => d.addOptions({ sync: "Use & sync", ignore: "Ignore" }).setValue(s.iconize || "sync")
+          .onChange(async (v) => { s.iconize = v; await p.saveSettings(); }));
+
+      heading("Behaviour");
+      toggle("Follow the open note", "When you open a note from anywhere (breadcrumbs, links, search), select its folder here.", "autoReveal", false);
+      toggle("Type pages", "Give each type a page — a note with a table of all its notes — and open it when you click the type. Off: Typefold never creates type pages; clicking a type shows its notes in the sidebar list. Each type can also opt out on its own.", "openBaseOnClick", false);
+      toggle("One folder open at a time", "Opening a type or folder closes the others, except the folders it sits in. Keeps a long tree short.", "oneFolderOpen", false);
+    }
+
+    if (this.tab === "notes") {
+      heading("Above the title");
+      toggle("Banner", "Show the cover / banner / image property above the title, and generated banners on type pages and folder notes.", "showBanner");
+      toggle("Note icons", "Icons you pick for single notes, shown above the title.", "showPageIcons", false);
+      toggle("Chips under the title", "Type, folder and property chips, plus the icon and banner buttons.", "showNoteChips", false);
+      toggle("Hide Iconize title icons on type pages", "Iconize rules can put a big icon above a type page's title (e.g. a “Note” rule matching “Daily Notes”). The type's icon is already in its chip.", "hideIconizeOnTypePages", false);
+
+      heading("In the note");
+      new Setting(el).setName("Hide properties by default").setDesc("Use the properties chip or the status bar to show them.")
+        .addToggle((t) => t.setValue(s.hideProperties).onChange(async (v) => {
+          s.hideProperties = v; p.propsVisible = !v; await p.saveSettings(false); p.updateStatus();
+        }));
+      toggle("Type icons before links", "Prefix internal links with the linked note's type icon.", "linkIcons");
+      toggle("Related objects", "Backlinks grouped by type, as cards at the bottom of the note.", "showRelated");
+      toggle("View tabs for Bases", "Show a base's views as tabs next to the result count, for .base files and bases embedded in notes.", "viewTabs");
+
+      heading("Folder notes");
+      new Setting(el).setName("Use folder notes")
+        .setDesc(this.app.plugins?.enabledPlugins?.has?.("folder-notes")
+          ? "Clicking a folder opens its folder note, and folder notes get a header and a board. Off: Typefold ignores folder notes completely."
+          : "Needs the Folder notes plugin (see More → Companion plugins). Off: Typefold ignores folder notes completely.")
+        .addToggle((t) => t.setValue(s.useFolderNotes !== false).onChange(async (v) => { s.useFolderNotes = v; await p.saveSettings(); this.display(); }));
+      if (s.useFolderNotes !== false)
+        toggle("Create folder notes for new folders", "When you add a folder inside a type set to “Folder + subfolders”, give it a folder note with a board. Types set to “Don't create” or “This folder” never get new ones. Off: never.", "autoFolderNotes", false);
+      heading("Files Typefold creates");
+      new Setting(el).setName("Folder for type pages").setDesc("Where type pages and the shared Folder.base are created.")
+        .addText((t) => t.setValue(s.basesFolder).setPlaceholder("Typefold")
+          .onChange(async (v) => { s.basesFolder = v.trim() || "Typefold"; await p.saveSettings(false); }));
+      new Setting(el).setName("Default folder for new objects")
+        .addText((t) => t.setValue(s.defaultFolder).setPlaceholder("vault root")
+          .onChange(async (v) => { s.defaultFolder = v.trim(); await p.saveSettings(false); }));
+    }
+
+    if (this.tab === "home") {
+      heading("Home page");
+      let noteRow;
+      new Setting(el).setName("Home opens").setDesc("Typefold's dashboard, or any note you choose (put ```typefold-home``` in a note to embed the dashboard there).")
+        .addDropdown((d) => d.addOptions({ typefold: "Typefold Home", note: "A note I choose" }).setValue(s.homeMode || "typefold")
+          .onChange(async (v) => { s.homeMode = v; noteRow.settingEl.toggle(v === "note"); await p.saveSettings(false); }));
+      noteRow = new Setting(el).setName("Home note").setDesc("The note opened by Home, the Home ribbon button and on startup.")
+        .addText((t) => {
+          t.setValue(s.homeNote || "").setPlaceholder("Home.md").onChange(async (v) => { s.homeNote = v.trim(); await p.saveSettings(false); });
+          new NoteSuggest(this.app, t.inputEl);
+        });
+      noteRow.settingEl.toggle((s.homeMode || "typefold") === "note");
+      toggle("Open Home on startup", "Show Home every time Obsidian starts.", "openHomeOnStartup", false);
+
+      heading("Dashboard sections");
+      toggle("Greeting", "The greeting and date at the top.", "homeGreeting", false);
+      toggle("Object types", "A card for each type with its latest notes.", "homeTypes", false);
+      toggle("Pinned", "Notes you pinned.", "homePinned", false);
+      toggle("Recently edited", "Your latest notes.", "homeRecent", false);
+      heading("Object types on Home", "Pick which types get a card on Home. Hidden types stay in the sidebar.");
+      for (const t of p.visibleTypes()) {
+        const row = new Setting(el).setName(t.label);
+        row.nameEl.prepend(paintIcon(createSpan("ot-setting-icon"), p.iconFor(t.key), p.colorFor(t.key)));
+        row.addToggle((tg) => tg.setValue(!s.types[t.key]?.hideOnHome).onChange(async (v) => {
+          if (v) delete p.conf(t.key).hideOnHome; else p.conf(t.key).hideOnHome = true;
+          await p.saveSettings(false); p.refreshViews();
+        }));
+      }
+      heading("Greeting");
+      new Setting(el).setName("Your name").setDesc("Used in the greeting.")
+        .addText((t) => t.setValue(s.userName || "").onChange(async (v) => { s.userName = v.trim(); await p.saveSettings(false); }));
+
+      heading("Weather");
+      toggle("Weather on Home", "Uses open-meteo.com with the location below (no account needed). This is Typefold's only network request.", "showWeather", false);
+      new Setting(el).setName("Location").setDesc("Place name, latitude, longitude")
+        .addText((t) => t.setValue(s.weatherPlace || "").setPlaceholder("Seoul").onChange(async (v) => { s.weatherPlace = v.trim(); await p.saveSettings(false); }))
+        .addText((t) => t.setValue(String(s.weatherLat ?? "")).onChange(async (v) => { s.weatherLat = parseFloat(v) || 0; p._wx = null; await p.saveSettings(false); }))
+        .addText((t) => t.setValue(String(s.weatherLon ?? "")).onChange(async (v) => { s.weatherLon = parseFloat(v) || 0; p._wx = null; await p.saveSettings(false); }));
+    }
+
+    if (this.tab === "tasks") {
+      heading("Source");
+      const tnOk = !!p.taskNotes(), tpOk = !!p.tasksPlugin();
+      new Setting(el).setName("Task source")
+        .setDesc("Where Calendar and Tasks read tasks from. TaskNotes: one note per task. Tasks plugin: checkbox tasks the Tasks plugin tracks (its global filter, done dates and recurrence). Checkboxes: every `- [ ]` in your notes.")
+        .addDropdown((d) => d.addOptions({
+          tasknotes: "TaskNotes" + (tnOk ? "" : " (not installed)"),
+          tasks: "Tasks plugin" + (tpOk ? "" : " (not installed)"),
+          checkbox: "Checkboxes (- [ ])",
+        }).setValue(s.taskSource || "checkbox").onChange(async (v) => { s.taskSource = v; await p.saveSettings(false); p.refreshTasks(); this.display(); }));
+      const srcNote = s.taskSource === "tasknotes" && !tnOk ? "TaskNotes isn't installed or enabled, so no tasks will show. Install it from Community plugins, or pick another source."
+        : s.taskSource === "tasks" && !tpOk ? "The Tasks plugin isn't installed or enabled. Until it is, Typefold reads checkboxes itself (📅 due and ⏳ scheduled dates included)."
+        : "";
+      if (srcNote) el.createEl("p", { cls: "setting-item-description ot-settings-warn", text: srcNote });
+      heading("Showing tasks");
+      toggle("Show completed tasks in the full view", "The full Tasks view lists completed tasks under “Completed”.", "taskShowDone", false);
+      new Setting(el).setName("Sidebar views").setDesc(`${(s.taskPanelViews || DEFAULT_TASK_VIEWS).length} views. Right-click a view tab in the sidebar to rename it, change its icon, layout or filters.`)
+        .addButton((b) => b.setButtonText("Reset to default views").onClick(async () => {
+          s.taskPanelViews = null; s.taskPanelView = "today"; await p.saveSettings(); this.display();
+        }));
+      new Setting(el).setName("Open Tasks").setDesc("The full view with Month, Week, Day and List.")
+        .addButton((b) => b.setButtonText("Open").onClick(() => p.openTasks()));
+    }
+
+    if (this.tab === "types") {
+      heading("Object types", "Every folder you registered as a type. The switch shows or hides it in the sidebar.");
+      const all = [...p.index.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+      if (!all.length) el.createEl("p", { cls: "setting-item-description", text: "No types yet. Use “New” in the sidebar or the command “Create new object type…”." });
+      for (const [key, entry] of all) {
+        const c = s.types[key] || {};
+        const row = new Setting(el).setName(`${p.labelFor(key)}`).setDesc(`${entry.files.length} notes · ${p.typeFolders(key).join(", ") || "no folder"}`);
+        row.nameEl.prepend(paintIcon(createSpan("ot-setting-icon"), p.iconFor(key), p.colorFor(key)));
+        row.addExtraButton((b) => b.setIcon("palette").setTooltip("Icon & color").onClick(() =>
+          new TypeConfigModal(p, key, () => this.display()).open()));
+        row.addExtraButton((b) => b.setIcon("trash-2").setTooltip("Delete type…").onClick(() => {
+          const m = new DeleteTypeModal(p, key);
+          const close = m.onClose.bind(m);
+          m.onClose = () => { close(); this.display(); };
+          m.open();
+        }));
+        row.addToggle((t) => t.setTooltip("Show in sidebar").setValue(!c.hidden).onChange(async (v) => {
+          p.conf(key).hidden = !v; await p.saveSettings();
+        }));
+      }
+    }
+
+    if (this.tab === "more") {
+      heading("Companion plugins", "Typefold works on its own. These add to it — install any you like.");
+      for (const comp of COMPANIONS) {
+        const installed = !!this.app.plugins?.manifests?.[comp.id];
+        const enabled = !!this.app.plugins?.enabledPlugins?.has(comp.id);
+        const row = new Setting(el).setName(comp.name + (comp.mine ? " ✦" : "")).setDesc(comp.why);
+        if (enabled) row.addButton((b) => b.setButtonText("Enabled").setDisabled(true));
+        else if (installed) row.addButton((b) => b.setButtonText("Enable").setCta().onClick(async () => { await this.app.plugins.enablePluginAndSave(comp.id); this.display(); }));
+        else row.addButton((b) => b.setButtonText("Install").onClick(() => window.open(`obsidian://show-plugin?id=${comp.id}`)));
+      }
+      heading("About");
+      new Setting(el).setName(`Typefold ${p.manifest.version}`).setDesc("The guide and the list of changes in this version.")
+        .addButton((b) => b.setButtonText("What's new").onClick(() => new WhatsNewModal(p, "new").open()))
+        .addButton((b) => b.setButtonText("Guide").onClick(() => new WhatsNewModal(p, "guide").open()));
+      heading("Developer");
+      toggle("Reload when plugin files change", "For editing this plugin: reload it automatically when main.js or styles.css change.", "devAutoReload", false);
     }
   }
 }
 
 /* track this plugin's open dialogs so they can be closed properly on unload */
-for (const C of [QuickOpenModal, IconColorModal, NoteIconModal, TypeConfigModal, NewTypeModal, DeleteTypeModal, TypePickerModal, BannerPickerModal]) {
+for (const C of [QuickOpenModal, IconColorModal, NoteIconModal, TypeConfigModal, NewTypeModal, DeleteTypeModal, TypePickerModal, BannerPickerModal, TaskViewModal, ConfirmModal, WhatsNewModal]) {
   const open = C.prototype.open, close = C.prototype.close;
   C.prototype.open = function (...a) { OPEN_MODALS.add(this); return open.apply(this, a); };
   C.prototype.close = function (...a) { OPEN_MODALS.delete(this); return close.apply(this, a); };
 }
 
 module.exports = TypefoldPlugin;
+
+/* nosourcemap */

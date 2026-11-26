@@ -1,9 +1,9 @@
 {
   "id": "typefold",
   "name": "Typefold",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "minAppVersion": "1.10.0",
-  "description": "Folders become object types: a sidebar navigator with type pages and folder boards, a Home dashboard, a new-tab search panel and built-in view tabs for Bases.",
+  "description": "Folders become object types: a sidebar navigator with type pages and folder boards, a calendar with your tasks, a Home dashboard, a new-tab search panel and built-in view tabs for Bases.",
   "author": "Jiwoo Roh",
   "authorUrl": "https://github.com/jiwooroh",
   "isDesktopOnly": false

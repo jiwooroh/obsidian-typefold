@@ -13,13 +13,17 @@
   "expanded": {
     "school": true,
     "fold:school::School/2026-1": true,
-    "books": true
+    "books": true,
+    "projects": true,
+    "fold:projects::Projects/Thesis": true,
+    "people": true
   },
   "openBaseOnClick": true,
   "basesFolder": "Typefold",
   "sortNotes": "modified",
   "listMode": "list",
   "showFiles": true,
+  "showFavorites": true,
   "showSmart": true,
   "showCounts": false,
   "defaultFolder": "",
@@ -38,8 +42,93 @@
   "smartItems": [
     "smart:home",
     "smart:inbox",
-    "smart:calendar"
+    "smart:calendar",
+    "smart:tasks"
   ],
+  "showRecents": true,
+  "recentsCount": 7,
+  "closedSections": {},
+  "recentFiles": [
+    "People/Ada Lovelace.md",
+    "Typefold/Books.md",
+    "Projects/Thesis/Literature map.md",
+    "Books/Deep Work.md",
+    "Papers/Attention Is All You Need.md",
+    "School/2026-2/Statistics/Week 1 - Distributions.md"
+  ],
+  "taskViews": {},
+  "taskShowDone": false,
+  "taskPanelViews": [
+    {
+      "id": "today",
+      "name": "Today",
+      "icon": "sun",
+      "layout": "today",
+      "filter": {
+        "scope": "all",
+        "tags": [],
+        "status": "open",
+        "date": "any"
+      }
+    },
+    {
+      "id": "week",
+      "name": "Week",
+      "icon": "calendar-range",
+      "layout": "week",
+      "filter": {
+        "scope": "all",
+        "tags": [],
+        "status": "open",
+        "date": "any"
+      }
+    },
+    {
+      "id": "month",
+      "name": "Month",
+      "icon": "calendar",
+      "layout": "month",
+      "filter": {
+        "scope": "all",
+        "tags": [],
+        "status": "open",
+        "date": "any"
+      }
+    },
+    {
+      "id": "all",
+      "name": "All",
+      "icon": "list-checks",
+      "layout": "list",
+      "filter": {
+        "scope": "all",
+        "tags": [],
+        "status": "open",
+        "date": "any"
+      }
+    }
+  ],
+  "taskPanelView": "today",
+  "showNoteChips": true,
+  "showPageIcons": true,
+  "showStatusBar": true,
+  "showRibbon": true,
+  "showNavFooter": true,
+  "showNavTop": true,
+  "homeGreeting": true,
+  "homeTypes": true,
+  "homePinned": true,
+  "homeRecent": true,
+  "showWhatsNew": true,
+  "lastSeenVersion": "",
+  "useFolderNotes": true,
+  "oneFolderOpen": false,
+  "hideIconizeOnTypePages": false,
+  "iconizeHintDismissed": false,
+  "splitCalendarTasks": false,
+  "taskSource": "checkbox",
+  "homeMode": "typefold",
+  "homeNote": "",
   "openHomeOnStartup": true,
   "newTabSearch": true,
   "userName": "Alex",
@@ -144,8 +233,11 @@
   },
   "folderTypesV": 2,
   "welcomed": true,
-  "listClosed": true,
-  "lastSelected": "books",
+  "listClosed": false,
+  "lastSelected": "people",
   "listPrefs": {},
-  "sidebarWide": 530
+  "sidebarWide": 530,
+  "calendarTipSeen": false,
+  "recentRowShown": true,
+  "tasksRowShown": true
 }
