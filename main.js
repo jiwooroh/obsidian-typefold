@@ -173,7 +173,10 @@ const DEFAULT_SETTINGS = {
   homeMode: "typefold", // "typefold" = built-in Home dashboard, "note" = the note in homeNote
   homeNote: "",
   openHomeOnStartup: true,
-  closeHomeOnLeave: true, // switching to another tab closes the Home tab
+  closeHomeOnLeave: true,
+  showTabAliases: true, // legacy on/off (tabAliasMode replaces it)
+  tabAliasMode: "all", // "all" | "picked" (only notes turned on from their ⋯ menu) | "off"
+  tabAliasNotes: {}, // path → true (show) / false (hide): per-note choice from the ⋯ menu // switching to another tab closes the Home tab
   newTabSearch: true,
   userName: "",
   showWeather: false,
@@ -249,7 +252,7 @@ class TypefoldPlugin extends Plugin {
     // the Tasks row was hidden by default before; show it once for existing vaults
     if (Array.isArray(this.settings.smartItems)) this.settings.smartItems = this.settings.smartItems.filter((k) => k !== "smart:recent");
     if (!this.settings.taskSource) {
-      const has = (id) => !!this.app.plugins?.enabledPlugins?.has?.(id);
+      const has = (id) => this.pluginOn(id);
       this.settings.taskSource = this.settings.useTaskNotes === false ? "checkbox"
         : has("tasknotes") ? "tasknotes" : has("obsidian-tasks-plugin") ? "tasks" : "checkbox";
     }
@@ -309,7 +312,9 @@ class TypefoldPlugin extends Plugin {
     }));
     this.registerEvent(this.app.vault.on("create", () => this.requestRebuild()));
     this.registerEvent(this.app.vault.on("delete", (f) => {
-      if (this.settings.defaultBanners?.[f.path]) { delete this.settings.defaultBanners[f.path]; this.saveData(this.settings); }
+      let dirty = false;
+      for (const k of ["defaultBanners", "tabAliasNotes", "bannerStyles"]) if (this.settings[k] && f.path in this.settings[k]) { delete this.settings[k][f.path]; dirty = true; }
+      if (dirty) this.saveData(this.settings);
       this.requestRebuild();
     }));
     // Home redraws only while it's on screen; a hidden Home is marked and redrawn when shown again
@@ -339,6 +344,33 @@ class TypefoldPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", navShown));
     this.app.workspace.onLayoutReady(navShown);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.requestDecorate()));
+    // the note's ⋯ menu: show / hide its alias in the tab, for this note only
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file, source) => {
+      if (source !== "more-options" || !file || file.extension !== "md") return;
+      const mode = this.tabAliasMode();
+      if (mode === "off" || !this.aliasOf(file)) return;
+      const shown = this.showsTabAlias(file);
+      menu.addItem((i) => {
+        i.setTitle(shown ? "Hide alias in tab" : "Show alias in tab").setIcon(shown ? "eye-off" : "eye").onClick(async () => {
+          this.settings.tabAliasNotes ||= {};
+          const want = !shown;
+          // store only what differs from the setting
+          if ((mode === "all" && want) || (mode === "picked" && !want)) delete this.settings.tabAliasNotes[file.path];
+          else this.settings.tabAliasNotes[file.path] = want;
+          await this.saveData(this.settings);
+          this.updateTabAliases();
+        });
+        i.setSection?.("view");
+      });
+    }));
+    // tab titles: show a note's first alias next to its name
+    const tabAliases = debounce(() => this.updateTabAliases(), 200, true);
+    this.registerEvent(this.app.workspace.on("layout-change", tabAliases));
+    this.registerEvent(this.app.workspace.on("file-open", tabAliases));
+    this.registerEvent(this.app.metadataCache.on("changed", tabAliases));
+    this.registerEvent(this.app.vault.on("rename", tabAliases));
+    this.app.workspace.onLayoutReady(() => this.updateTabAliases());
+    this.register(() => this.app.workspace.iterateAllLeaves((l) => { if (l.tabHeaderInnerTitleEl) delete l.tabHeaderInnerTitleEl.dataset.otAlias; }));
     // leaving Home for another tab closes the Home tab (it's one click away in the sidebar)
     this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
       const prev = this._lastMainLeaf;
@@ -418,7 +450,7 @@ class TypefoldPlugin extends Plugin {
       if (!this.settings.welcomed) {
         this.settings.welcomed = true;
         this.saveData(this.settings);
-        const missing = COMPANIONS.slice(0, 3).filter((c) => !this.app.plugins?.enabledPlugins?.has(c.id)).map((c) => c.name);
+        const missing = COMPANIONS.slice(0, 3).filter((c) => !this.pluginOn(c.id)).map((c) => c.name);
         new Notice(`Typefold is ready — right-click a folder in the file explorer → “Register as object type…”.${missing.length ? `\nWorks even better with: ${missing.join(", ")} (see settings).` : ""}`, 12000);
       }
     });
@@ -554,7 +586,7 @@ class TypefoldPlugin extends Plugin {
     }
     // tabs are built in now: switch off the separate View Tabs plugin so there's one tab bar
     const other = "view-tabs-for-bases";
-    if (this.settings.viewTabs && this.app.plugins?.enabledPlugins?.has(other)) {
+    if (this.settings.viewTabs && this.pluginOn(other)) {
       this.app.plugins.disablePluginAndSave(other).then(() => new Notice("View tabs are now built into Typefold — turned off “View Tabs for Bases”."));
     }
     sync();
@@ -936,6 +968,7 @@ class TypefoldPlugin extends Plugin {
     for (const [cls, on] of [["ot-no-chips", !s.showNoteChips], ["ot-no-page-icons", !s.showPageIcons], ["ot-no-status", !s.showStatusBar],
       ["ot-no-ribbon", !s.showRibbon], ["ot-no-navfoot", !s.showNavFooter], ["ot-no-navtop", !s.showNavTop],
       ["ot-hide-iz-typepages", !!s.hideIconizeOnTypePages],
+      ["ot-tab-aliases", this.tabAliasMode() !== "off"],
       ["ot-home-no-greeting", !s.homeGreeting], ["ot-home-no-types", !s.homeTypes], ["ot-home-no-pinned", !s.homePinned], ["ot-home-no-recent", !s.homeRecent]])
       document.body.toggleClass(cls, !!on);
   }
@@ -1349,7 +1382,7 @@ class TypefoldPlugin extends Plugin {
       location: st.storageLocation || "insideFolder",
       types: (st.supportedFileTypes || ["md", "canvas", "base"]).map((t) => t.replace(/^\./, "")),
       main: (st.folderNoteType || ".md").replace(/^\./, ""),
-      enabled: this.settings.useFolderNotes !== false && !!this.app.plugins?.enabledPlugins?.has?.("folder-notes"),
+      enabled: this.settings.useFolderNotes !== false && this.pluginOn("folder-notes"),
     };
   }
 
@@ -1781,7 +1814,7 @@ class TypefoldPlugin extends Plugin {
     for (const p of this.settings.pinned) if (p.kind === "note" && p.id === oldPath) p.id = newPath;
     const ri = (this.settings.recentFiles || []).indexOf(oldPath);
     if (ri >= 0) this.settings.recentFiles[ri] = newPath;
-    for (const k of ["defaultBanners", "noteIcons", "bannerStyles"]) {
+    for (const k of ["defaultBanners", "noteIcons", "bannerStyles", "tabAliasNotes"]) {
       const m = this.settings[k];
       if (m && oldPath in m) { m[newPath] = m[oldPath]; delete m[oldPath]; }
     }
@@ -1816,7 +1849,10 @@ class TypefoldPlugin extends Plugin {
   }
 
   /** Extended Base (Notion-style views) installed and enabled? Otherwise use core Bases views. */
-  hasExtendedBase() { return !!this.app.plugins?.enabledPlugins?.has("extended-base"); }
+  /** a companion plugin counts only when it's really installed (has a manifest) and switched on —
+   *  community-plugins.json can list plugins whose folders aren't there (e.g. a copied or demo vault) */
+  pluginOn(id) { const pl = this.app.plugins; return !!(pl?.manifests?.[id] && pl?.enabledPlugins?.has?.(id)); }
+  hasExtendedBase() { return this.pluginOn("extended-base"); }
 
   baseYaml(typeKey, folder) {
     const c = this.settings.types[typeKey] || {};
@@ -2037,6 +2073,36 @@ class TypefoldPlugin extends Plugin {
     }
     await this.app.workspace.getLeaf(false).openFile(file, { eState: { rename: "all" } });
     return file;
+  }
+
+  /* ── tabs: a note's first alias, faintly after the title (v7 · UT Austin SOP) ── */
+  aliasOf(file) {
+    const fm = file && this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const a = fm?.aliases ?? fm?.alias;
+    const first = Array.isArray(a) ? a.find((x) => x != null && String(x).trim()) : a;
+    return first != null && String(first).trim() ? String(first).trim() : "";
+  }
+  tabAliasMode() {
+    const s = this.settings;
+    return s.tabAliasMode || (s.showTabAliases === false ? "off" : "all");
+  }
+  /** should this note's tab show its alias? the setting, or the note's own ⋯-menu choice */
+  showsTabAlias(file) {
+    if (!file) return false;
+    const mode = this.tabAliasMode();
+    if (mode === "off") return false;
+    const own = this.settings.tabAliasNotes?.[file.path];
+    return mode === "picked" ? own === true : own !== false;
+  }
+  updateTabAliases() {
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const el = leaf.tabHeaderInnerTitleEl;
+      if (!el) return;
+      const f = leaf.view?.file;
+      const alias = this.showsTabAlias(f) ? this.aliasOf(f) : "";
+      if (alias && alias !== leaf.view?.file?.basename) el.dataset.otAlias = alias;
+      else delete el.dataset.otAlias;
+    });
   }
 
   /* ── new note / folder from the sidebar's context menus ── */
@@ -3817,6 +3883,7 @@ class TypefoldView extends ItemView {
         else setIcon(ic, f.extension === "md" ? "file-text" : f.extension === "canvas" ? "layout-dashboard" : f.extension === "base" ? "table" : f.extension === "pdf" ? "file-type" : "file");
       }
       r.createSpan({ cls: "ot-nav-label", text: f.basename });
+      this.extBadge(r, f);
       if (f.path === active) r.addClass("is-active-note");
       this.bindFile(r, f);
       r.oncontextmenu = (evt) => this.noteMenu(evt, f, (m) => m.addItem((i) => {
@@ -3889,6 +3956,7 @@ class TypefoldView extends ItemView {
             else setIcon(ic, f.extension === "md" ? "file-text" : f.extension === "canvas" ? "layout-dashboard" : f.extension === "base" ? "table" : f.extension === "pdf" ? "file-type" : "file");
           }
           label();
+          this.extBadge(r, f);
           this.bindFile(r, f);
           r.addClass("ot-file-row");
           r.oncontextmenu = (evt) => this.noteMenu(evt, f, (m) => m.addItem((i) => {
@@ -3991,6 +4059,12 @@ class TypefoldView extends ItemView {
       .sort((a, b) => a.basename.localeCompare(b.basename, undefined, { numeric: true }));
   }
 
+  /** a small DOCX / CSV / PDF tag at the right of a file row (nothing for notes) */
+  extBadge(row, f) {
+    if (!f?.extension || f.extension === "md") return;
+    row.createSpan({ cls: "ot-ext-badge ot-row-ext", text: f.extension.toUpperCase() });
+  }
+
   renderFileRows(parent, files, depth, typeKey) {
     const p = this.plugin;
     const active = this.app.workspace.getActiveFile()?.path;
@@ -4001,12 +4075,13 @@ class TypefoldView extends ItemView {
       if (f.path === active) r.addClass("is-active-note");
       const ic = r.createSpan("ot-file-icon");
       const iz = p.iconizeInfo(f.path);
-      if (iz && p.drawIconize(ic, iz)) { r.createSpan({ cls: "ot-nav-label", text: f.extension === "md" ? f.basename : f.name }); this.bindFile(r, f); continue; }
+      if (iz && p.drawIconize(ic, iz)) { r.createSpan({ cls: "ot-nav-label", text: f.basename }); this.extBadge(r, f); this.bindFile(r, f); continue; }
       const ownIc = p.settings.noteIcons?.[f.path];
-      if (ownIc) { paintIcon(ic, ownIc.icon, ownIc.color || NO_COLOR); r.createSpan({ cls: "ot-nav-label", text: f.basename }); this.bindFile(r, f); continue; }
+      if (ownIc) { paintIcon(ic, ownIc.icon, ownIc.color || NO_COLOR); r.createSpan({ cls: "ot-nav-label", text: f.basename }); this.extBadge(r, f); this.bindFile(r, f); continue; }
       const icon = f.extension === "md" ? "file-text" : f.extension === "canvas" ? "layout-dashboard" : f.extension === "base" ? "table" : f.extension === "pdf" ? "file-type" : IMG_EXT.includes(f.extension.toLowerCase()) ? "image" : "file";
       setIcon(ic, icon);
-      r.createSpan({ cls: "ot-nav-label", text: f.extension === "md" ? f.basename : f.name });
+      r.createSpan({ cls: "ot-nav-label", text: f.basename });
+      this.extBadge(r, f);
       this.bindFile(r, f);
     }
   }
@@ -6240,6 +6315,9 @@ class TypefoldSettingTab extends PluginSettingTab {
       heading("Above the title");
       toggle("Banner", "Show the cover / banner / image property above the title, and generated banners on type pages and folder notes.", "showBanner");
       toggle("Note icons", "Icons you pick for single notes, shown above the title.", "showPageIcons", false);
+      new Setting(el).setName("Aliases in tabs").setDesc("Show a note's first alias, faintly, after its name in the tab — handy for notes named v1, v2… “Notes I pick”: turn it on per note from the note's ⋯ menu (which can also hide it for one note when this is “All notes”).")
+        .addDropdown((d) => d.addOptions({ all: "All notes", picked: "Notes I pick", off: "Off" }).setValue(p.tabAliasMode())
+          .onChange(async (v) => { s.tabAliasMode = v; await p.saveSettings(false); p.updateTabAliases(); }));
       toggle("Chips under the title", "Type, folder and property chips, plus the icon and banner buttons.", "showNoteChips", false);
       toggle("Hide Iconize title icons on type pages", "Iconize rules can put a big icon above a type page's title (e.g. a “Note” rule matching “Daily Notes”). The type's icon is already in its chip.", "hideIconizeOnTypePages", false);
 
@@ -6254,7 +6332,7 @@ class TypefoldSettingTab extends PluginSettingTab {
 
       heading("Folder notes");
       new Setting(el).setName("Use folder notes")
-        .setDesc(this.app.plugins?.enabledPlugins?.has?.("folder-notes")
+        .setDesc(p.pluginOn("folder-notes")
           ? "Clicking a folder opens its folder note, and folder notes get a header and a board. Off: Typefold ignores folder notes completely."
           : "Needs the Folder notes plugin (see More → Companion plugins). Off: Typefold ignores folder notes completely.")
         .addToggle((t) => t.setValue(s.useFolderNotes !== false).onChange(async (v) => { s.useFolderNotes = v; await p.saveSettings(); this.display(); }));
@@ -6360,7 +6438,7 @@ class TypefoldSettingTab extends PluginSettingTab {
       heading("Companion plugins", "Typefold works on its own. These add to it — install any you like.");
       for (const comp of COMPANIONS) {
         const installed = !!this.app.plugins?.manifests?.[comp.id];
-        const enabled = !!this.app.plugins?.enabledPlugins?.has(comp.id);
+        const enabled = p.pluginOn(comp.id); // installed and switched on (not just listed in community-plugins.json)
         const row = new Setting(el).setName(comp.name + (comp.mine ? " ✦" : "")).setDesc(comp.why);
         if (enabled) row.addButton((b) => b.setButtonText("Enabled").setDisabled(true));
         else if (installed) row.addButton((b) => b.setButtonText("Enable").setCta().onClick(async () => { await this.app.plugins.enablePluginAndSave(comp.id); this.display(); }));

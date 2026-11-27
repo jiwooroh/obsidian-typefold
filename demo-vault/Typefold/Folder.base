@@ -4,10 +4,19 @@ filters:
     - file.name != this.file.name
     - file.basename != file.folder.split("/")[-1]
 views:
-  - type: bases
-    name: View
+  - type: table
+    name: Table
     groupBy:
       property: file.folder
       direction: ASC
-    propertyLabelDisplay: icon-name
-    groupColorDisplay: label
+    order:
+      - file.name
+      - file.mtime
+    sort:
+      - property: file.mtime
+        direction: DESC
+  - type: cards
+    name: Cards
+    order:
+      - file.name
+      - file.mtime

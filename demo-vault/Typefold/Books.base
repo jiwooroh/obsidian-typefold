@@ -3,15 +3,11 @@ filters:
     - 'file.inFolder("Books")'
     - 'file.basename != file.folder.split("/")[-1]'
 views:
-  - type: bases
+  - type: table
     name: Table
-    groupBy:
-      property: file.folder
-      direction: ASC
     order:
       - file.name
       - status
-      - created
       - author
       - year
       - rating
@@ -19,30 +15,10 @@ views:
     sort:
       - property: file.mtime
         direction: DESC
-  - type: notion-board
-    name: Board
-    groupBy:
-      property: status
-      direction: ASC
+  - type: cards
+    name: Cards
     order:
       - file.name
-      - status
-      - created
       - author
       - year
       - rating
-      - file.mtime
-  - type: notion-list
-    name: List
-    order:
-      - file.name
-      - status
-      - created
-      - author
-      - year
-      - rating
-      - file.mtime
-  - type: notion-feed
-    name: Feed
-    order:
-      - file.name

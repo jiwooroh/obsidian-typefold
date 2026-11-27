@@ -1224,3 +1224,18 @@ body.ot-hide-iz-typepages .ot-type-page .iconize-title-icon { display: none !imp
 .markdown-source-view .ot-related, .markdown-reading-view .ot-related { max-width: none; margin-left: 0; margin-right: 0; }
 .ot-rel-head, .ot-rel-tabs { justify-content: flex-start; }
 .ot-rel-grid { justify-content: start; }
+
+/* a note's alias after its name in the tab */
+body.ot-tab-aliases .workspace-tab-header-inner-title[data-ot-alias]::after {
+  content: " · " attr(data-ot-alias); color: var(--text-faint); font-weight: 400;
+}
+/* file-type tag on sidebar file rows */
+.ot-nav-row .ot-row-ext { margin-left: auto; flex: none; font-size: 9.5px; line-height: 14px; padding: 0 4px; }
+.ot-nav-row .ot-row-ext + .ot-count { margin-left: 6px; }
+
+/* grid list grouped by folder: a subfolder's header and its cards take the full width, not one cell each */
+.ot-list.is-grid .ot-group-items > .ot-group,
+.ot-list.is-grid .ot-group-items > .ot-group-items { grid-column: 1 / -1; }
+
+/* some themes (e.g. Baseline) pad the bottom of every view; the navigator's footer belongs at the very bottom */
+body .workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root { padding-bottom: 0 !important; }
