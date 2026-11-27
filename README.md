@@ -68,7 +68,7 @@ One dialog for creating and editing a type, in three tabs:
 - Banner, icon and title, then type chips, a properties toggle, and buttons to set an icon or a banner.
 - Banners can **Fill**, **Fit** or be dragged to a new position, or borrow the banner of a folder above the note or of its object type.
 - Links get a small icon of the linked note's type.
-- Notes that link here, grouped by type, as cards at the bottom.
+- **Related** at the bottom: notes that link here and notes this one links to, grouped by type, as cards.
 
 ![Note header](docs/note.png)
 

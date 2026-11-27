@@ -338,6 +338,11 @@ class TypefoldPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", navShown));
     this.app.workspace.onLayoutReady(navShown);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.requestDecorate()));
+    // the sidebar's highlight follows the main area (Home, the tasks view, a type page) as you switch tabs
+    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+      if (leaf && leaf.view?.getViewType?.() === VIEW_TYPE) return; // clicking the sidebar itself
+      for (const l of this.app.workspace.getLeavesOfType(VIEW_TYPE)) { if (l.view) l.view._preferSelected = false; l.view?.markActive?.(); }
+    }));
     // default-explorer mode: if something shows the core File explorer, show this panel instead
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       if (!this.settings.replaceExplorer) return;
@@ -2228,8 +2233,8 @@ class TypefoldPlugin extends Plugin {
       });
     }
     if (this.settings.showRelated) {
-      const groups = this.relatedGroups(file);
-      if (groups.length) {
+      const groups = { in: this.relatedGroups(file, "in"), out: this.relatedGroups(file, "out") };
+      if (groups.in.length || groups.out.length) {
         const targets = [
           root.querySelector(".markdown-source-view .cm-sizer"),
           root.querySelector(".markdown-reading-view .mod-footer"),
@@ -2542,11 +2547,24 @@ class TypefoldPlugin extends Plugin {
     });
   }
 
-  relatedGroups(file) {
+  /** notes this one links to (resolved, markdown only) */
+  outlinksOf(file) {
+    const out = [];
+    for (const path of Object.keys(this.app.metadataCache.resolvedLinks[file.path] || {})) {
+      if (path === file.path) continue;
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (f && f.extension === "md") out.push(f);
+    }
+    return out;
+  }
+  /** related notes grouped by type; dir "in" = notes linking here, "out" = notes this one links to */
+  relatedGroups(file, dir = "in") {
     const groups = new Map();
-    for (const src of this.backlinksOf(file)) {
-      const key = this.typeOfFile(src);
-      if (!key || this.settings.types[key]?.hidden) continue;
+    for (const src of dir === "out" ? this.outlinksOf(file) : this.backlinksOf(file)) {
+      if (this.isFolderNote?.(src) && dir === "out") continue;
+      let key = this.typeOfFile(src);
+      if (key && this.settings.types[key]?.hidden) continue;
+      if (!key) key = "_other";
       if (!groups.has(key)) groups.set(key, { key, files: [], backKey: null });
       const g = groups.get(key);
       g.files.push(src);
@@ -2556,7 +2574,7 @@ class TypefoldPlugin extends Plugin {
         if (hit) g.backKey = hit.key.replace(/\.\d+$/, "");
       }
     }
-    return [...groups.values()].sort((a, b) => b.files.length - a.files.length);
+    return [...groups.values()].sort((a, b) => (a.key === "_other") - (b.key === "_other") || b.files.length - a.files.length);
   }
 
   subtitleFor(file, skipKey) {
@@ -2573,36 +2591,58 @@ class TypefoldPlugin extends Plugin {
     return parts.join(" · ");
   }
 
-  renderRelated(sec, file, groups, view) {
-    const state = (view._otRelated ||= { tab: null, sort: "name" });
-    if (!groups.some((g) => g.key === state.tab)) state.tab = groups[0].key;
+  renderRelated(sec, file, both, view) {
+    const state = (view._otRelated ||= { dir: null, tab: null, sort: "name" });
+    if (!state.dir || !both[state.dir]?.length) state.dir = both.in.length ? "in" : "out";
+    const label = (k) => (k === "_other" ? "Other notes" : this.labelFor(k));
 
+    const head = sec.createDiv("ot-rel-head");
+    head.createDiv({ cls: "ot-rel-title", text: "Related" });
+    const seg = head.createDiv("ot-rel-dirs");
     const bar = sec.createDiv("ot-rel-tabs");
     const body = sec.createDiv("ot-rel-grid");
     const draw = () => {
-      bar.empty(); body.empty();
+      seg.empty(); bar.empty(); body.empty();
+      for (const [d, text, icon] of [["in", "Linked from", "arrow-down-left"], ["out", "Links to", "arrow-up-right"]]) {
+        const n = both[d].reduce((acc, g) => acc + g.files.length, 0);
+        const b = seg.createDiv("ot-rel-dir" + (state.dir === d ? " is-active" : "") + (n ? "" : " is-empty"));
+        setIcon(b.createSpan("ot-rel-dir-icon"), icon);
+        b.createSpan({ text });
+        b.createSpan({ cls: "ot-rel-tab-count", text: String(n) });
+        b.setAttr("aria-label", d === "in" ? "Notes that link to this one" : "Notes this one links to");
+        if (n) b.onclick = () => { state.dir = d; state.tab = null; draw(); };
+      }
+      const groups = both[state.dir];
+      if (!groups.some((g) => g.key === state.tab)) state.tab = groups[0].key;
       for (const g of groups) {
         const t = bar.createDiv("ot-rel-tab");
         if (g.key === state.tab) t.addClass("is-active");
-        t.createSpan({ cls: "ot-rel-tab-label", text: this.labelFor(g.key) });
+        t.createSpan({ cls: "ot-rel-tab-label", text: label(g.key) });
         let meta = String(g.files.length);
-        if (g.key === state.tab) {
+        if (g.key === state.tab && g.key !== "_other") {
           const years = g.files.map((f) => {
             const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {};
+            const y = fm.year ?? fm.Year ?? fm.published;
+            if (y != null && /^\d{4}/.test(String(y))) return +String(y).slice(0, 4);
             for (const v of Object.values(fm)) { const m = /^(\d{4})\b/.exec(String(v)); if (m) return +m[1]; }
             return null;
           }).filter(Boolean);
-          if (years.length > 1) meta += ` · ${Math.min(...years)}–${Math.max(...years)}`;
+          if (years.length > 1) {
+            const lo = Math.min(...years), hi = Math.max(...years);
+            meta += lo === hi ? ` · ${lo}` : ` · ${lo}–${hi}`;
+          }
         }
         t.createSpan({ cls: "ot-rel-tab-count", text: meta });
         t.onclick = () => { state.tab = g.key; draw(); };
       }
       bar.createDiv("ot-spacer");
       const g = groups.find((x) => x.key === state.tab);
-      const open = bar.createDiv("ot-rel-open");
-      setIcon(open.createSpan(), "arrow-up-right");
-      open.createSpan({ text: this.labelFor(g.key) });
-      open.onclick = () => this.activateView().then(() => this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view?.select(g.key));
+      if (g.key !== "_other") {
+        const open = bar.createDiv("ot-rel-open");
+        setIcon(open.createSpan(), "arrow-up-right");
+        open.createSpan({ text: label(g.key) });
+        open.onclick = () => this.activateView().then(() => this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view?.select(g.key));
+      }
       const sort = bar.createDiv("clickable-icon ot-rel-btn");
       setIcon(sort, "arrow-up-down");
       sort.setAttr("aria-label", state.sort === "name" ? "Sorted by name" : "Sorted by modified");
@@ -2616,7 +2656,7 @@ class TypefoldPlugin extends Plugin {
         const cover = card.createDiv("ot-card-cover");
         const src = this.thumbnailFor(f);
         if (src) cover.createEl("img", { attr: { src, loading: "lazy" } });
-        else paintIcon(cover.createDiv("ot-card-placeholder"), this.iconFor(g.key), this.colorFor(g.key));
+        else paintIcon(cover.createDiv("ot-card-placeholder"), g.key === "_other" ? "file-text" : this.iconFor(g.key), g.key === "_other" ? "#8E8E93" : this.colorFor(g.key));
         const txt = card.createDiv("ot-card-text");
         txt.createDiv({ cls: "ot-card-title", text: f.basename });
         const sub = this.subtitleFor(f, g.backKey);
@@ -2626,10 +2666,13 @@ class TypefoldPlugin extends Plugin {
           event: evt, source: "preview", hoverParent: view, targetEl: card, linktext: f.path,
         });
       }
-      const add = body.createDiv("ot-card ot-card-add");
-      setIcon(add.createDiv("ot-card-add-icon"), "plus");
-      add.createDiv({ text: `Add ${this.labelFor(g.key).toLowerCase()}` });
-      add.onclick = () => this.createObject(g.key, { [g.backKey || "related"]: `[[${file.basename}]]` });
+      // "Add …" makes a new note that links here, so it belongs to "Linked from"
+      if (state.dir === "in" && g.key !== "_other") {
+        const add = body.createDiv("ot-card ot-card-add");
+        setIcon(add.createDiv("ot-card-add-icon"), "plus");
+        add.createDiv({ text: `Add ${label(g.key).toLowerCase()}` });
+        add.onclick = () => this.createObject(g.key, { [g.backKey || "related"]: `[[${file.basename}]]` });
+      }
     };
     draw();
   }
@@ -3456,6 +3499,7 @@ class TypefoldView extends ItemView {
 
   select(key, opts = {}) {
     if (key === "smart:tasks" && this.plugin.calendarMerged()) key = "smart:calendar";
+    this._preferSelected = true;
     this.listLimit = 0;
     this.plugin.settings.lastSelected = key;
     this.plugin.saveData(this.plugin.settings);
@@ -3498,10 +3542,12 @@ class TypefoldView extends ItemView {
     }
     const ns = el.querySelector(".ot-nav-pane .ot-scroll"); if (ns) ns.scrollTop = navScroll;
     const ls = el.querySelector(".ot-list-pane .ot-list"); if (ls) ls.scrollTop = listScroll;
+    this.markActive();
   }
 
   async setListClosed(v) {
     const st = this.plugin.settings;
+    if (v) this._preferSelected = false;
     try {
       const ls = this.app.workspace.leftSplit;
       if (ls && this.contentEl.closest(".mod-left-split")) {
@@ -3568,6 +3614,7 @@ class TypefoldView extends ItemView {
     };
     const row = (parent, key, label, opts = {}) => {
       const r = parent.createDiv("ot-nav-row");
+      if (key) r.dataset.navKey = key;
       if (key === this.selected) r.addClass("is-selected");
       const tile = paintIcon(r.createSpan(), opts.icon || p.iconFor(key), opts.color || p.colorFor(key));
       if (key && !key.includes(":") && !opts.icon && !p.settings.types[key]?.icon) {
@@ -3615,6 +3662,7 @@ class TypefoldView extends ItemView {
             onClick: (evt) => this.app.workspace.getLeaf(Keymap.isModEvent(evt)).openFile(f),
             menu: (evt) => this.noteMenu(evt, f),
           });
+          r.dataset.path = f.path;
           if (this.app.workspace.getActiveFile() === f) r.addClass("is-active-note");
         }
       }
@@ -3812,7 +3860,8 @@ class TypefoldView extends ItemView {
           if (custom?.icon || custom?.color) paintIcon(ic, custom.icon || "folder", custom.color || NO_COLOR);
           else if (!(iz && p.drawIconize(ic, iz))) setIcon(ic, "folder");
           label();
-          if (key && key === this.selected) r.addClass("is-selected");
+          if (key) r.dataset.navKey = key;
+      if (key && key === this.selected) r.addClass("is-selected");
           r.onclick = (evt) => {
             if (key) return this.select(key);
             const fn = p.folderNoteOf(f.path);
@@ -4844,11 +4893,39 @@ class TypefoldView extends ItemView {
     }
   }
 
+  /** what the main area shows, as a sidebar key: Home, the tasks view, or a type page (null for anything else) */
+  mainContextKey() {
+    const p = this.plugin;
+    const leaf = this.app.workspace.getMostRecentLeaf?.(this.app.workspace.rootSplit) || this.app.workspace.activeLeaf;
+    const type = leaf?.view?.getViewType?.();
+    if (type === HOME_VIEW) return "smart:home";
+    if (type === TASKS_VIEW) return p.calendarMerged() ? "smart:calendar" : "smart:tasks";
+    const file = leaf?.view?.file;
+    if (!file) return null;
+    if (p.homeFile()?.path === file.path) return "smart:home";
+    const tk = p.typePageKey(file) || Object.keys(p.settings.types).find((k) => !k.includes(":") && p.typeNotePath(k) === file.path);
+    return tk || null;
+  }
+
   markActive() {
-    const active = this.app.workspace.getActiveFile()?.path;
+    // highlight what the main area shows (Home, the tasks view, a type page); otherwise the list's selection
+    // the sidebar's own selection only counts while its list panel is open;
+    // with the panel closed, the highlight follows the main area (nothing for an ordinary note)
+    const listOpen = !this.plugin.settings.listClosed;
+    const ctx = this.mainContextKey();
+    const want = listOpen ? (this._preferSelected ? this.selected : ctx || this.selected) : ctx;
+    this.contentEl.querySelectorAll(".ot-nav-pane .ot-nav-row[data-nav-key], .ot-pane > .ot-scroll .ot-nav-row[data-nav-key]").forEach((el) =>
+      el.toggleClass("is-selected", el.dataset.navKey === want));
+    // the note shown in the main area (getActiveFile() keeps the last note even while Home is open);
+    // nothing when the main area is Home, the tasks view or a type page
+    const mainLeaf = this.app.workspace.getMostRecentLeaf?.(this.app.workspace.rootSplit) || this.app.workspace.activeLeaf;
+    const active = ctx ? null : mainLeaf?.view?.file?.path || null;
     this.contentEl.querySelectorAll(".ot-cal-day").forEach((el) => el.toggleClass("is-active", !!el.dataset.path && el.dataset.path === active));
     this.contentEl.querySelectorAll(".ot-item").forEach((el) => el.toggleClass("is-active", el.dataset.path === active));
     this.contentEl.querySelectorAll(".ot-file-row").forEach((el) => el.toggleClass("is-active-note", el.dataset.path === active));
+    // any other row still marked from an earlier draw (pinned notes, favorites…)
+    this.contentEl.querySelectorAll(".is-active-note").forEach((el) => { if (el.dataset.path !== active) el.removeClass("is-active-note"); });
+    if (active) this.contentEl.querySelectorAll(".ot-nav-row[data-path]").forEach((el) => el.toggleClass("is-active-note", el.dataset.path === active));
   }
 }
 
@@ -6160,7 +6237,7 @@ class TypefoldSettingTab extends PluginSettingTab {
           s.hideProperties = v; p.propsVisible = !v; await p.saveSettings(false); p.updateStatus();
         }));
       toggle("Type icons before links", "Prefix internal links with the linked note's type icon.", "linkIcons");
-      toggle("Related objects", "Backlinks grouped by type, as cards at the bottom of the note.", "showRelated");
+      toggle("Related", "At the bottom of a note: notes that link to it and notes it links to, grouped by type, as cards.", "showRelated");
       toggle("View tabs for Bases", "Show a base's views as tabs next to the result count, for .base files and bases embedded in notes.", "viewTabs");
 
       heading("Folder notes");
@@ -6295,4 +6372,5 @@ for (const C of [QuickOpenModal, IconColorModal, NoteIconModal, TypeConfigModal,
 
 module.exports = TypefoldPlugin;
 
+/* nosourcemap */
 /* nosourcemap */

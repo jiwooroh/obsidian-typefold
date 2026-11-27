@@ -1210,3 +1210,17 @@ body.ot-hide-iz-typepages .ot-type-page .iconize-title-icon { display: none !imp
 .ot-cal-tip .ot-hint-text { min-width: 0; }
 .ot-cal-tip button { flex: none; font-size: 12px; height: 24px; padding: 0 10px; }
 .ot-start-apply { position: static; background: none; padding: 10px 0 4px; }
+
+/* Related: title + Linked from / Links to */
+.ot-rel-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.ot-rel-title { font-size: 15px; font-weight: 700; color: var(--text-normal); }
+.ot-rel-dirs { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--background-modifier-hover); }
+.ot-rel-dir { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 6px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; }
+.ot-rel-dir.is-active { background: var(--background-primary); color: var(--text-normal); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+.ot-rel-dir.is-empty { opacity: .45; cursor: default; }
+.ot-rel-dir-icon { display: flex; } .ot-rel-dir-icon svg { width: 13px; height: 13px; }
+
+/* Related starts at the left edge of the note's text instead of centring on its own */
+.markdown-source-view .ot-related, .markdown-reading-view .ot-related { max-width: none; margin-left: 0; margin-right: 0; }
+.ot-rel-head, .ot-rel-tabs { justify-content: flex-start; }
+.ot-rel-grid { justify-content: start; }
