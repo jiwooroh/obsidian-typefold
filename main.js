@@ -173,6 +173,7 @@ const DEFAULT_SETTINGS = {
   homeMode: "typefold", // "typefold" = built-in Home dashboard, "note" = the note in homeNote
   homeNote: "",
   openHomeOnStartup: true,
+  closeHomeOnLeave: true, // switching to another tab closes the Home tab
   newTabSearch: true,
   userName: "",
   showWeather: false,
@@ -338,6 +339,17 @@ class TypefoldPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", navShown));
     this.app.workspace.onLayoutReady(navShown);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.requestDecorate()));
+    // leaving Home for another tab closes the Home tab (it's one click away in the sidebar)
+    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+      const prev = this._lastMainLeaf;
+      const inMain = leaf && leaf.getRoot?.() === this.app.workspace.rootSplit;
+      if (!inMain) return; // sidebars, popovers: not leaving
+      this._lastMainLeaf = leaf;
+      if (!this.settings.closeHomeOnLeave || !prev || prev === leaf) return;
+      if (prev.view?.getViewType?.() !== HOME_VIEW) return;
+      if (prev.getRoot?.() !== this.app.workspace.rootSplit) return; // already moved or closed
+      window.setTimeout(() => { if (prev.view?.getViewType?.() === HOME_VIEW && this.app.workspace.activeLeaf !== prev) prev.detach(); }, 0);
+    }));
     // the sidebar's highlight follows the main area (Home, the tasks view, a type page) as you switch tabs
     this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
       if (leaf && leaf.view?.getViewType?.() === VIEW_TYPE) return; // clicking the sidebar itself
@@ -6270,6 +6282,7 @@ class TypefoldSettingTab extends PluginSettingTab {
         });
       noteRow.settingEl.toggle((s.homeMode || "typefold") === "note");
       toggle("Open Home on startup", "Show Home every time Obsidian starts.", "openHomeOnStartup", false);
+      toggle("Close Home when you leave it", "Switching to another tab closes the Home tab. Open it again from the sidebar or the ribbon.", "closeHomeOnLeave", false);
 
       heading("Dashboard sections");
       toggle("Greeting", "The greeting and date at the top.", "homeGreeting", false);
