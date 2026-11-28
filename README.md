@@ -51,7 +51,7 @@ Prefer them apart? *Settings → Sidebar → Calendar and Tasks as separate rows
 ### Object types, made your way
 One dialog for creating and editing a type, in three tabs:
 - **Basics** — one or more folders, and which **pages** to make: *Don't create*, *This folder* (a type page with a table of all its notes) or *Folder + subfolders* (plus a board page in every subfolder). Also where new notes go, whether notes elsewhere can join through their frontmatter, and whether the type shows on Home.
-- **Icon & color**.
+- **Icon & color** — Lucide icons, your Iconize icon packs or emoji; colours from Apple, Notion, Pastel, Matcha or Mono palettes, or any colour you pick.
 - **Properties** — what every new note of this type starts with:
   1. **Common properties** the notes in that folder already use, most used first.
   2. **From the folder structure** — e.g. `School/2026-1/Statistics` → `semester: 2026-1`, `course: Statistics`.
@@ -65,7 +65,9 @@ One dialog for creating and editing a type, in three tabs:
 - With [Folder notes](https://github.com/lostpaul/obsidian-folder-notes), clicking a folder opens its folder note with a board of that folder's notes. Typefold only creates folder notes when you ask it to.
 
 ### Notes
-- Banner, icon and title, then type chips, a properties toggle, and buttons to set an icon or a banner.
+- A Notion-like top: a banner across the whole note with the icon sitting on its edge (or a banner as wide as the text), then the title, type chips, a properties chip, and buttons to set an icon or a banner.
+- **Properties under the title**: the properties chip opens an editable box, written in Markdown. Right-click a property to rename it, change its type, choose when it shows (always, when filled, never), move or remove it; drag to reorder. Prefer Obsidian's own Properties? *Settings → Notes → Properties view*.
+- **Breadcrumb**: the folders a note sits in, in a slim header bar that shows when you point at it, or above the title.
 - Banners can **Fill**, **Fit** or be dragged to a new position, or borrow the banner of a folder above the note or of its object type.
 - Links get a small icon of the linked note's type.
 - **Related** at the bottom: notes that link here and notes this one links to, grouped by type, as cards.
@@ -90,7 +92,7 @@ Touch-sized rows and buttons, one pane at a time on phones, and the sidebar clos
 Settings are split into **General · Sidebar · Notes · Home · Tasks · Types · More**, and nearly everything has an on/off switch:
 
 - **Sidebar** — each shortcut, Favorites, Recents, Files, counts, the New & Search buttons, the footer, one folder open at a time.
-- **Notes** — banners, note icons, chips under the title, related notes, type icons before links, view tabs for Bases, folder notes, type pages.
+- **Notes** — banners (full width or inside the text), note icons, the breadcrumb, the properties box, chips under the title, related notes, type icons before links, view tabs for Bases, folder notes, type pages.
 - **Home** — the greeting, the type cards (and which types), pinned and recently edited notes, weather, opening Home on startup.
 - **General** — ribbon buttons, the status bar, the new-tab search panel, the "what's new" window after updates.
 

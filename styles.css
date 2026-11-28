@@ -1239,3 +1239,211 @@ body.ot-tab-aliases .workspace-tab-header-inner-title[data-ot-alias]::after {
 
 /* some themes (e.g. Baseline) pad the bottom of every view; the navigator's footer belongs at the very bottom */
 body .workspace-leaf-content[data-type="typefold-view"] > .view-content.ot-root { padding-bottom: 0 !important; }
+
+/* chips off hides only the chips, not the tags or the properties box */
+body.ot-no-chips .ot-note-chipsrow { display: block !important; }
+body.ot-no-chips .ot-note-chipsrow > .ot-chips { display: none !important; }
+
+/* tags under the chips */
+.ot-tag-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.ot-tag-pill { white-space: nowrap; font-size: 12.5px; line-height: 22px; padding: 0 9px; border-radius: 999px; cursor: pointer;
+  color: var(--tag-color, var(--text-accent)); background: var(--tag-background, color-mix(in srgb, var(--interactive-accent) 10%, transparent)); }
+.ot-tag-pill:hover { background: var(--tag-background-hover, color-mix(in srgb, var(--interactive-accent) 18%, transparent)); }
+.ot-tag-more { color: var(--text-muted); background: var(--background-modifier-hover); }
+.ot-collections-chip { white-space: nowrap; }
+
+/* properties box under the title */
+.ot-propbox { display: grid; grid-template-columns: minmax(90px, max-content) minmax(0, 1fr); gap: 2px 16px; margin: 12px 0 2px; padding: 10px 12px;
+  border-radius: 10px; background: var(--background-secondary); font-size: 13.5px; }
+.ot-propbox-row { display: contents; }
+.ot-propbox-name { color: var(--text-muted); padding: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ot-propbox-value { padding: 3px 0; min-width: 0; overflow-wrap: anywhere; }
+.ot-propbox-value > p { margin: 0; display: inline; }
+.ot-propbox-value.is-empty { color: var(--text-faint); }
+body.is-phone .ot-propbox { grid-template-columns: 1fr; gap: 0; }
+body.is-phone .ot-propbox-name { padding-bottom: 0; font-size: 12px; }
+
+/* colour picker: palette + custom */
+.ot-colorpick-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.ot-palette-select { height: 28px; font-size: 12.5px; }
+.ot-color-custom { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; margin-left: auto; }
+.ot-color-custom input[type="color"] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: none; cursor: pointer; }
+.ot-swatch-current { outline: 2px dashed var(--background-modifier-border); outline-offset: 2px; }
+/* icon picker tabs + emoji */
+.ot-iconpick-tabs { margin-bottom: 8px; }
+.ot-emoji { font-size: 1.05em; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.ot-icon-cell .ot-emoji { font-size: 18px; }
+.ot-tm-propdisplay { display: flex; flex-direction: column; gap: 4px; }
+.ot-tm-pd-row { display: flex; align-items: center; gap: 10px; padding: 2px 4px; border-radius: 6px; }
+.ot-tm-pd-row:hover { background: var(--background-modifier-hover); }
+.ot-tm-pd-name { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-tm-pd-row select { height: 28px; font-size: 12.5px; }
+.ot-tm-pd-add input { margin: 4px 0 0; width: 100%; }
+
+/* breadcrumb above the title */
+.ot-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; margin: 0 0 6px; font-size: 13px; color: var(--text-faint); }
+.ot-crumb-type { width: 18px; height: 18px; border-radius: 5px; margin-right: 2px; }
+.ot-crumb-type svg { width: 12px; height: 12px; }
+.ot-crumb-seg, .ot-crumb-more { cursor: pointer; padding: 1px 4px; border-radius: 4px; color: var(--text-muted); white-space: nowrap; }
+.ot-crumb-seg:hover, .ot-crumb-more:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.ot-crumb-sep { color: var(--text-faint); }
+.ot-note-top + .ot-breadcrumb { margin-top: -8px; }
+
+/* room between the title and the chips under it (an older rule zeroed this on object notes) */
+.ot-object-note .ot-note-header.ot-note-chipsrow { margin-top: 18px; }
+.ot-object-note .ot-note-header.ot-note-chipsrow .ot-propbox { margin-top: 14px; }
+
+/* Typefold properties view: Obsidian's own properties stay hidden in object notes */
+.workspace-leaf-content.ot-object-note.ot-tf-props .metadata-container,
+.workspace-leaf-content.ot-object-note.ot-tf-props .pp-properties-container { display: none !important; }
+/* editable box */
+.ot-propbox-row { display: contents; }
+.ot-propbox.is-expanded { grid-template-columns: minmax(90px, max-content) minmax(0, 1fr) auto; }
+.ot-propbox-value.is-editable { cursor: text; border-radius: 5px; padding: 3px 6px; margin: 0 -6px; }
+.ot-propbox-value.is-editable:hover { background: var(--background-modifier-hover); }
+.ot-propbox-input { width: 100%; height: 26px; font-size: 13.5px; margin: -2px 0; }
+.ot-propbox-del { padding: 2px; align-self: center; opacity: 0; }
+.ot-propbox-del svg { width: 13px; height: 13px; }
+.ot-propbox-row:hover .ot-propbox-del, .ot-propbox-del:hover, body.is-mobile .ot-propbox-del { opacity: 1; }
+.ot-propbox.is-expanded .ot-propbox-row:hover > * { background-clip: padding-box; }
+.ot-propbox-add { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--text-faint); }
+.ot-propbox-add-icon { display: flex; } .ot-propbox-add-icon svg { width: 13px; height: 13px; }
+.ot-propbox-add input { flex: 1; border: none !important; background: transparent !important; box-shadow: none !important; padding: 2px 0; font-size: 13px; height: auto; }
+body.is-phone .ot-propbox.is-expanded { grid-template-columns: minmax(0, 1fr) auto; }
+body.is-phone .ot-propbox.is-expanded .ot-propbox-name { grid-column: 1 / -1; }
+
+/* property editor: a box that grows with the text (2–8 lines) */
+.ot-propbox-input.ot-propbox-textarea { display: block; width: 100%; min-height: calc(2 * 21px + 12px); max-height: calc(8 * 21px + 12px); height: auto;
+  resize: vertical; line-height: 21px; padding: 6px 8px; margin: -2px 0; font-size: 13.5px; font-family: inherit; overflow-y: auto; }
+.ot-propbox-value:has(.ot-propbox-textarea) { background: none; }
+/* Iconize's title icon in the colour picked for the note */
+.ot-iz-colored .iconize-title-icon, .ot-iz-colored .iconize-title-icon svg { color: var(--ot-title-icon-color) !important; }
+.ot-iz-colored .iconize-title-icon svg [stroke]:not([stroke="none"]) { stroke: currentColor; }
+
+/* reorder properties by dragging their name */
+.ot-propbox-name[draggable="true"] { cursor: grab; }
+.ot-propbox.is-dragging .ot-propbox-name, .ot-propbox.is-dragging .ot-propbox-value { transition: box-shadow .08s; }
+.ot-propbox .is-drop-target { box-shadow: inset 0 2px 0 var(--interactive-accent); }
+
+/* lighter note top: breadcrumb above the banner, the icon sitting on the banner's lower edge */
+.ot-breadcrumb { margin: 0 0 8px; font-size: 12.5px; }
+.ot-breadcrumb + .ot-note-top { margin-top: 0; }
+.ot-note-top + .ot-breadcrumb { margin-top: 0; }
+.ot-object-note .ot-note-top .ot-banner { margin: 0; height: 132px; }
+body.is-phone .ot-object-note .ot-note-top .ot-banner { height: 100px; }
+.ot-note-top + .iconize-title-icon,
+.ot-note-top + .ot-page-icon,
+.ot-note-top + .iconize-inline-title-wrapper .iconize-title-icon {
+  position: relative; z-index: 2; margin-top: -34px !important; margin-bottom: 4px !important;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .12));
+}
+.ot-note-top + .ot-page-icon svg { width: 56px; height: 56px; }
+/* no icon: the title starts a little under the banner */
+.ot-note-top + .inline-title { margin-top: 18px; }
+/* chips a touch closer to the title */
+.ot-object-note .ot-note-header.ot-note-chipsrow { margin-top: 12px; margin-bottom: 12px; }
+
+/* ───── Notion-style top of a note ───── */
+/* cover: full pane width (placed by fitCover), square, flush to the top */
+.ot-object-note .ot-note-top { position: relative; z-index: 0; }
+.ot-object-note .ot-note-top .ot-banner { border-radius: 0; border: none; height: clamp(150px, 26vh, 260px); margin: 0; }
+body.is-phone .ot-object-note .ot-note-top .ot-banner { height: clamp(110px, 22vh, 170px); }
+/* icon: bigger, half on the cover */
+.ot-note-top + .ot-page-icon { margin: -40px 0 0 !important; position: relative; z-index: 2; filter: none; }
+.ot-note-top + .ot-page-icon svg { width: 78px; height: 78px; stroke-width: 1.5; }
+.ot-note-top + .iconize-title-icon,
+.ot-note-top + .iconize-inline-title-wrapper .iconize-title-icon { margin-top: -44px !important; margin-bottom: 0 !important; position: relative; z-index: 2; filter: none; }
+/* "Add icon · Add cover": quiet until you hover the note */
+.ot-note-actions { display: flex; flex-wrap: wrap; gap: 2px; margin: 10px 0 2px -6px; opacity: 0; transition: opacity .15s; }
+.markdown-source-view:hover .ot-note-actions, .markdown-reading-view:hover .ot-note-actions, body.is-mobile .ot-note-actions { opacity: 1; }
+.ot-note-actions .ot-chip-btn { display: inline-flex; align-items: center; gap: 5px; width: auto; height: 26px; padding: 0 8px; border-radius: 6px; color: var(--text-faint); font-size: 13px; cursor: pointer; }
+.ot-note-actions .ot-chip-btn:hover { background: var(--background-modifier-hover); color: var(--text-muted); }
+.ot-note-actions .ot-chip-btn svg { width: 15px; height: 15px; }
+.ot-note-top + .ot-note-actions { margin-top: 14px; }
+.ot-note-actions + .inline-title, .ot-note-actions + .iconize-inline-title-wrapper { margin-top: 4px; }
+/* breadcrumb in the view's header bar, in place of Obsidian's folder path there */
+.view-header-title-container.ot-crumbs-in-header > .view-header-breadcrumb,
+.view-header-title-container.ot-crumbs-in-header > .view-header-breadcrumb-separator { display: none; }
+.ot-header-crumbs { display: inline-flex; align-items: center; gap: 2px; margin: 0 6px 0 0; font-size: var(--font-ui-small); color: var(--text-muted); white-space: nowrap; min-width: 0; overflow: hidden; }
+.ot-header-crumbs .ot-crumb-type { width: 18px; height: 18px; margin-right: 4px; flex: none; }
+.ot-header-crumbs .ot-crumb-path { display: inline-flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
+.ot-header-crumbs .ot-crumb-seg, .ot-header-crumbs .ot-crumb-more { padding: 1px 5px; }
+.ot-header-crumbs .ot-crumb-sep { color: var(--text-faint); padding: 0 1px; }
+.ot-header-crumbs .ot-crumb-current { display: none; } /* the header bar already shows the note's name */
+.ot-header-crumbs .ot-crumb-current + * { display: none; }
+.ot-header-crumbs > .ot-crumb-sep:last-of-type { display: inline; }
+/* in-page breadcrumb (when the header bar is hidden) */
+.ot-breadcrumb:not(.ot-header-crumbs) { margin: 0 0 10px; }
+.ot-breadcrumb:not(.ot-header-crumbs) .ot-crumb-current { color: var(--text-muted); padding: 1px 4px; }
+
+/* breadcrumb in the header bar stays visible even when the theme fades that bar's text */
+.view-header-title-container.ot-crumbs-in-header > .ot-header-crumbs { opacity: 1 !important; visibility: visible !important; flex: 0 1 auto; }
+.view-header-title-container.ot-crumbs-in-header > .view-header-title-parent { display: none !important; }
+.ot-header-crumbs.ot-show-current .ot-crumb-current { display: inline; color: var(--text-normal); padding: 1px 5px; }
+.ot-header-crumbs:not(.ot-show-current) > .ot-crumb-sep:last-of-type { display: inline; }
+.ot-header-crumbs.ot-show-current > .ot-crumb-sep:last-of-type { display: inline; }
+
+/* banner width "Inside the text": the original rounded banner, icon below it */
+body:not(.ot-banner-full) .ot-object-note .ot-note-top .ot-banner { border-radius: 10px; height: 150px; margin: 0 0 18px; }
+body.is-phone:not(.ot-banner-full) .ot-object-note .ot-note-top .ot-banner { height: 110px; }
+body:not(.ot-banner-full) .ot-object-note .ot-note-top .ot-banner-generated { border: 1px solid color-mix(in srgb, var(--ot-color) 18%, transparent); }
+body:not(.ot-banner-full) .ot-note-top + .ot-page-icon,
+body:not(.ot-banner-full) .ot-note-top + .iconize-title-icon,
+body:not(.ot-banner-full) .ot-note-top + .iconize-inline-title-wrapper .iconize-title-icon { margin-top: 0 !important; }
+body:not(.ot-banner-full) .ot-note-top + .ot-page-icon svg { width: 52px; height: 52px; }
+
+/* breadcrumb back in the page, right above the title: no note name (the title is right below) */
+.ot-breadcrumb:not(.ot-header-crumbs) { margin: 6px 0 2px; }
+.ot-breadcrumb:not(.ot-header-crumbs) .ot-crumb-current,
+.ot-breadcrumb:not(.ot-header-crumbs) > .ot-crumb-sep:last-of-type { display: none; }
+.ot-note-top + .ot-breadcrumb { margin-top: 14px; }
+.ot-breadcrumb + .inline-title, .ot-breadcrumb + .iconize-inline-title-wrapper { margin-top: 2px; }
+
+/* icon closer to the cover: deeper on its edge */
+body.ot-banner-full .ot-note-top + .ot-page-icon { margin-top: -54px !important; }
+body.ot-banner-full .ot-note-top + .iconize-title-icon,
+body.ot-banner-full .ot-note-top + .iconize-inline-title-wrapper .iconize-title-icon { margin-top: -58px !important; }
+body:not(.ot-banner-full) .ot-object-note .ot-note-top .ot-banner { margin-bottom: 8px; }
+body:not(.ot-banner-full) .ot-note-top + .ot-page-icon,
+body:not(.ot-banner-full) .ot-note-top + .iconize-title-icon { margin-top: 0 !important; margin-bottom: 4px !important; }
+.ot-note-top + .ot-page-icon + .ot-breadcrumb, .ot-note-top + .iconize-title-icon + .ot-breadcrumb { margin-top: 8px; }
+
+
+
+
+/* header-bar breadcrumb: shown at the top of the note (even with themes that fade the header), gone once you scroll */
+.view-header-title-container.ot-crumbs-in-header { display: flex; align-items: center; justify-content: flex-start; min-width: 0; }
+.view-header-title-container.ot-crumbs-in-header > .view-header-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-header-crumbs { margin: 0 4px 0 0 !important; }
+/* shown only while the pointer is over the header bar (or while renaming the note there) */
+.workspace-leaf-content .view-header:not(.ot-x):not(:hover) .view-header-title-container.ot-crumbs-in-header > div:not(:focus-within) { opacity: 0 !important; }
+.workspace-leaf-content .view-header:not(.ot-x):hover .view-header-title-container.ot-crumbs-in-header > div { opacity: 1 !important; visibility: visible !important; }
+.view-header-title-container.ot-crumbs-in-header > div { transition: opacity 0.2s ease; }
+
+/* header bar on notes just tall enough for the breadcrumb (themes like Cupertino make it 52px) */
+body.ot-crumbs-header:not(.is-mobile) .mod-root .workspace-leaf-content[data-type="markdown"] {
+  --header-height: 28px;
+  --view-header-height: 28px;
+}
+body.ot-crumbs-header:not(.is-mobile) .mod-root .workspace-leaf-content[data-type="markdown"] > .view-header { height: 28px !important; min-height: 28px; }
+body.ot-crumbs-header.focus-view:not(.is-mobile) .workspace .mod-root .workspace-leaf-content[data-type="markdown"] {
+  --view-top-spacing-markdown: 28px;
+  --file-margins: calc(var(--file-margins-y) + 28px) var(--file-margins-y);
+}
+/* Breadcrumbs plugin leaves an empty 16px row above the note when it has nothing to show */
+.BC-page-views > .markdown-rendered:not(:has(a, img, input)) { margin-bottom: 0 !important; }
+
+/* header bar contents sized to the 28px bar */
+body.ot-crumbs-header:not(.is-mobile) .mod-root .workspace-leaf-content[data-type="markdown"] > .view-header .clickable-icon { padding: 3px 4px; }
+body.ot-crumbs-header:not(.is-mobile) .mod-root .workspace-leaf-content[data-type="markdown"] > .view-header .view-header-title-container { height: 28px !important; }
+/* long breadcrumbs: shrink, then end in … instead of pushing the bar */
+.view-header-title-container.ot-crumbs-in-header { overflow: hidden; }
+.ot-header-crumbs { flex: 0 1 auto !important; min-width: 0; max-width: 70%; overflow: hidden; }
+.ot-header-crumbs .ot-crumb-path { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.ot-header-crumbs .ot-crumb-seg { flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-header-crumbs .ot-crumb-sep, .ot-header-crumbs .ot-crumb-type, .ot-header-crumbs .ot-crumb-more { flex: none; }
+.view-header-title-container.ot-crumbs-in-header > .view-header-title { flex: 1 1 auto; min-width: 3em; }
+
+/* no banner: a little more room above the icon / title (scrolls with the note) */
+.mod-root .workspace-leaf-content[data-type="markdown"]:not(.ot-has-banner) .cm-editor > .cm-scroller > .cm-sizer,
+.mod-root .workspace-leaf-content[data-type="markdown"]:not(.ot-has-banner) .markdown-preview-sizer { padding-top: 48px !important; }
